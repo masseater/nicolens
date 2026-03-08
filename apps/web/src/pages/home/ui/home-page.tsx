@@ -95,8 +95,8 @@ const PageOneContent = ({
   <div className="flex h-full snap-start flex-col items-center pb-[var(--header-height)]">
     <div className="flex-1" />
     {/* Invisible placeholder — the fixed form visually sits here */}
-    <div ref={placeholderRef} className="w-full max-w-2xl px-3 py-2 sm:px-4">
-      <div className="h-12" />
+    <div ref={placeholderRef} className="w-full max-w-2xl px-3 py-2 sm:px-4 sm:py-3">
+      <div className="h-[5.25rem] sm:h-24" />
     </div>
     <div className="flex w-full max-w-2xl flex-col gap-3 px-3 pt-6 sm:gap-4 sm:px-4 sm:pt-8">
       <SavedSearchesList />

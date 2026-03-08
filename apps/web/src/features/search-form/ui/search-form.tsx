@@ -1,7 +1,7 @@
 "use client";
 
 import { Brain, Search } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { parseQueryInput } from "@/shared/lib";
@@ -141,8 +141,14 @@ const SearchActions = ({ isLarge, onSemantic, onTagless }: SearchActionsProps) =
   </>
 );
 
-export const SearchForm = ({ defaultValue = "", size = "lg" }: SearchFormProps) => {
-  const [query, setQuery] = useState(defaultValue);
+export const SearchForm = ({ defaultValue, size = "lg" }: SearchFormProps) => {
+  const searchParams = useSearchParams();
+  const initialValue = defaultValue ?? searchParams?.get(QUERY_PARAM) ?? "";
+  const [query, setQuery] = useState(initialValue);
+
+  useEffect(() => {
+    setQuery(initialValue);
+  }, [initialValue]);
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   useSlashFocus(inputRef);
