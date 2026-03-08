@@ -7,6 +7,7 @@
     },
     "build": {
       "dependsOn": ["^build"],
+      "env": ["DATABASE_URL", "GEMINI_API_KEY"],
       "outputs": [".next/**", "!.next/cache/**"]
     },
     "lint": {},
