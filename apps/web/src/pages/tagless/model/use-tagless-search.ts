@@ -115,7 +115,7 @@ const useTaglessQuery = (state: TaglessSearchState) =>
   });
 
 const isEffectivelyLoading = (query: ReturnType<typeof useTaglessQuery>): boolean =>
-  query.isLoading || query.isPlaceholderData;
+  query.isLoading || query.isPlaceholderData || query.isFetching;
 
 const useTaglessNavigate = () => {
   const router = useRouter();

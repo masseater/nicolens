@@ -76,8 +76,11 @@ export const useSemanticSearch = (): SemanticSearchData => {
   const state = useMemo(() => parseSemanticParams(params), [params]);
   const hasQuery = state.query.trim() !== "";
 
-  const { data, isLoading, isPlaceholderData, error } = useSemanticSearchQuery(state, hasQuery);
-  const loading = isLoading || isPlaceholderData;
+  const { data, isLoading, isPlaceholderData, isFetching, error } = useSemanticSearchQuery(
+    state,
+    hasQuery,
+  );
+  const loading = isLoading || isPlaceholderData || isFetching;
   const viewMode = useViewMode((store) => store.viewMode);
   const handleViewModeChange = useViewMode((store) => store.setViewMode);
   const { buildPageHref, handlePageChange, handleLimitChange } = useSemanticNavigation(state);

@@ -53,7 +53,7 @@ const useSearchData = (searchParams: ReturnType<typeof useSearchParams>) => {
   const state = useMemo(() => parseSearchParams(params), [params]);
   const hasQuery = state.query.trim() !== "";
 
-  const { data, isLoading, error } = useSearchQuery(state, hasQuery);
+  const { data, isLoading, isFetching, error } = useSearchQuery(state, hasQuery);
 
   useEffect(() => {
     if (hasQuery) {
@@ -65,7 +65,7 @@ const useSearchData = (searchParams: ReturnType<typeof useSearchParams>) => {
     state,
     results: data?.data ?? [],
     totalCount: data?.meta.totalCount ?? INITIAL_TOTAL_COUNT,
-    loading: isLoading,
+    loading: isLoading || isFetching,
     error: error === null ? null : getErrorMessage(error),
   };
 };
