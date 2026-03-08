@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "next": { "entry": ["app/**/*.{ts,tsx}"] },
+  "entry": ["src/**/*.{ts,tsx}", "app/**/*.{ts,tsx}"],
+  "project": ["**/*.{ts,tsx}"],
+  "ignore": [],
+  "ignoreDependencies": [
+    "shadcn",
+    "tw-animate-css",
+    "tailwindcss",
+    "postcss",
+    "eslint-plugin-boundaries",
+    "eslint-import-resolver-typescript"
+  ]
+}

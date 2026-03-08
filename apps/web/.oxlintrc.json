@@ -1,0 +1,211 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "import",
+    "typescript",
+    "unicorn",
+    "react",
+    "nextjs",
+    "jsx-a11y",
+    "react-perf",
+    "promise",
+    "node"
+  ],
+  "jsPlugins": ["eslint-plugin-boundaries"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "warn",
+    "perf": "warn",
+    "style": "warn"
+  },
+  "options": {
+    "typeAware": true
+  },
+  "env": {
+    "browser": true,
+    "es2024": true,
+    "node": true
+  },
+  "settings": {
+    "react": {
+      "version": "19"
+    },
+    "next": {
+      "rootDir": "."
+    },
+    "import/resolver": {
+      "typescript": {
+        "alwaysTryTypes": true,
+        "project": "./tsconfig.json"
+      }
+    },
+    "boundaries/elements": [
+      { "type": "app", "pattern": ["app/**"], "mode": "full", "capture": ["_route"] },
+      { "type": "pages", "pattern": ["src/pages/*/**"], "mode": "full", "capture": ["slice"] },
+      { "type": "widgets", "pattern": ["src/widgets/*/**"], "mode": "full", "capture": ["slice"] },
+      {
+        "type": "features",
+        "pattern": ["src/features/*/**"],
+        "mode": "full",
+        "capture": ["slice"]
+      },
+      {
+        "type": "entities",
+        "pattern": ["src/entities/*/**"],
+        "mode": "full",
+        "capture": ["slice"]
+      },
+      { "type": "shared", "pattern": ["src/shared/**"], "mode": "full" }
+    ]
+  },
+  "rules": {
+    // TypeScript strict rules
+    "@typescript-eslint/no-explicit-any": "error",
+    "@typescript-eslint/no-non-null-assertion": "error",
+    "@typescript-eslint/consistent-type-imports": "warn",
+
+    // Import rules
+    "import/no-cycle": "error",
+    "import/no-self-import": "error",
+    "import/no-duplicates": "error",
+    // Ban default exports — named inline exports only
+    "import/no-default-export": "error",
+    // These rules conflict with inline export style
+    "import/no-named-export": "off",
+    "import/group-exports": "off",
+    "import/prefer-default-export": "off",
+    // exports-last conflicts with inline export declarations
+    "import/exports-last": "off",
+
+    // General strict rules
+    "eqeqeq": "error",
+    "no-console": "warn",
+    "no-debugger": "error",
+    "no-alert": "error",
+    "no-var": "error",
+    "prefer-const": "error",
+    "no-eval": "error",
+    "no-implied-eval": "error",
+
+    // React 19 JSX Transform — React import not required
+    "react/react-in-jsx-scope": "off",
+    "react/jsx-key": "error",
+    "react/no-array-index-key": "warn",
+    "react/self-closing-comp": "warn",
+    // shadcn components rely on {...props} spreading — fundamental pattern
+    "react/jsx-props-no-spreading": "off",
+    // Deep JSX nesting is inherent to React component composition
+    "react/jsx-max-depth": "off",
+
+    // Inline arrow functions in onClick/onChange are idiomatic React
+    "react-perf/jsx-no-new-function-as-prop": "off",
+    // JSX as prop (render props pattern) is standard React
+    "react-perf/jsx-no-jsx-as-prop": "off",
+
+    // no-ternary bans all ternaries — ternaries are idiomatic in JSX
+    "no-ternary": "off",
+    // sort-keys requires alphabetical object keys — impractical
+    "sort-keys": "off",
+    // sort-imports conflicts with oxfmt's import sorting
+    "sort-imports": "off",
+
+    // Inline type specifiers are needed when mixing type and value imports from same module
+    "import/consistent-type-specifier-style": "off",
+
+    // FSD layer boundary enforcement
+    "boundaries/element-types": [
+      "error",
+      {
+        "default": "disallow",
+        "rules": [
+          { "from": "app", "allow": ["app", "pages", "widgets", "features", "entities", "shared"] },
+          {
+            "from": "pages",
+            "allow": [
+              ["pages", { "slice": "${from.slice}" }],
+              "widgets",
+              "features",
+              "entities",
+              "shared"
+            ]
+          },
+          { "from": "widgets", "allow": ["features", "entities", "shared"] },
+          {
+            "from": "features",
+            "allow": [["features", { "slice": "${from.slice}" }], "entities", "shared"]
+          },
+          {
+            "from": "entities",
+            "allow": [["entities", { "slice": "${from.slice}" }], "shared"]
+          },
+          { "from": "shared", "allow": ["shared"] }
+        ]
+      }
+    ],
+
+    // File size
+    "max-lines": ["warn", { "max": 500 }],
+
+    // Unicorn
+    "unicorn/filename-case": "off",
+    "unicorn/no-null": "off",
+    "unicorn/prevent-abbreviations": "off",
+    "unicorn/prefer-global-this": "off"
+  },
+  "overrides": [
+    {
+      // Next.js pages/layouts/config require default export
+      "files": [
+        "app/**/page.tsx",
+        "app/**/layout.tsx",
+        "app/**/not-found.tsx",
+        "app/**/route.ts",
+        "next.config.ts",
+        "postcss.config.mjs",
+        "drizzle.config.ts"
+      ],
+      "rules": {
+        "import/no-default-export": "off",
+        "boundaries/element-types": "off"
+      }
+    },
+    {
+      // Vitest config requires default export and Node.js modules
+      "files": ["vitest.config.ts"],
+      "rules": {
+        "import/no-default-export": "off",
+        "import/no-nodejs-modules": "off"
+      }
+    },
+    {
+      // Vitest setup uses side-effect imports
+      "files": ["vitest.setup.ts"],
+      "rules": {
+        "import/no-unassigned-import": "off"
+      }
+    },
+    {
+      // Test files have relaxed rules
+      "files": ["**/*.test.ts", "**/*.test.tsx"],
+      "rules": {
+        "no-magic-numbers": "off",
+        "max-lines-per-function": "off",
+        "max-statements": "off",
+        "id-length": "off",
+        "new-cap": "off",
+        "@typescript-eslint/no-unsafe-type-assertion": "off",
+        "unicorn/no-useless-undefined": "off",
+        "unicorn/consistent-function-scoping": "off",
+        "unicorn/numeric-separators-style": "off",
+        "promise/avoid-new": "off",
+        "init-declarations": "off",
+        "max-lines": "off",
+        "import/first": "off",
+        "promise/prefer-await-to-then": "off",
+        "@typescript-eslint/no-unsafe-assignment": "off"
+      }
+    }
+  ],
+  "ignorePatterns": [".next/", "node_modules/", "public/", "next-env.d.ts"]
+}
