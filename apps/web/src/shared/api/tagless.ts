@@ -1,5 +1,7 @@
 import type { SearchFilters, SnapshotSearchResponse, TaglessSearchState } from "@/shared/types";
 
+import { getApiBaseUrl } from "./base-url";
+
 const HTTP_BAD_REQUEST = 400;
 const HTTP_SERVICE_UNAVAILABLE = 503;
 
@@ -63,7 +65,7 @@ const appendFilterParams = (params: URLSearchParams, state: TaglessSearchState):
 const buildTaglessUrl = (state: TaglessSearchState): string => {
   const params = buildBaseParams(state);
   appendFilterParams(params, state);
-  return `/api/tagless?${params.toString()}`;
+  return `${getApiBaseUrl()}/api/tagless?${params.toString()}`;
 };
 
 const parseErrorBody = async (response: Response): Promise<string> => {

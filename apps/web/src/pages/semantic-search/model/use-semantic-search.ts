@@ -5,19 +5,12 @@ import { useCallback, useMemo } from "react";
 
 import { useSemanticSearchQuery } from "@/features/semantic-search";
 import { useViewMode } from "@/shared/hooks";
+import { parseSemanticParams } from "@/shared/lib";
 import type { SemanticSearchResult, SemanticSearchState, ViewMode } from "@/shared/types";
 
-const DEFAULT_LIMIT = 20;
 const DEFAULT_PAGE = 1;
-const MIN_LIMIT = 1;
 const INITIAL_TOTAL_COUNT = 0;
 const INITIAL_INDEXED_COUNT = 0;
-
-const parseSemanticParams = (params: URLSearchParams): SemanticSearchState => ({
-  query: params.get("q") ?? "",
-  page: Math.max(DEFAULT_PAGE, Number(params.get("page") ?? String(DEFAULT_PAGE))),
-  limit: Math.max(MIN_LIMIT, Number(params.get("limit") ?? String(DEFAULT_LIMIT))),
-});
 
 const buildSemanticUrl = (state: SemanticSearchState): string => {
   const params = new URLSearchParams({
@@ -83,7 +76,8 @@ export const useSemanticSearch = (): SemanticSearchData => {
   const state = useMemo(() => parseSemanticParams(params), [params]);
   const hasQuery = state.query.trim() !== "";
 
-  const { data, isLoading, error } = useSemanticSearchQuery(state, hasQuery);
+  const { data, isLoading, isPlaceholderData, error } = useSemanticSearchQuery(state, hasQuery);
+  const loading = isLoading || isPlaceholderData;
   const viewMode = useViewMode((store) => store.viewMode);
   const handleViewModeChange = useViewMode((store) => store.setViewMode);
   const { buildPageHref, handlePageChange, handleLimitChange } = useSemanticNavigation(state);
@@ -93,7 +87,7 @@ export const useSemanticSearch = (): SemanticSearchData => {
     results: data?.results ?? [],
     totalCount: data?.totalCount ?? INITIAL_TOTAL_COUNT,
     indexedCount: data?.indexedCount ?? INITIAL_INDEXED_COUNT,
-    loading: isLoading,
+    loading,
     error: error === null ? null : getErrorMessage(error),
     viewMode,
     buildPageHref,

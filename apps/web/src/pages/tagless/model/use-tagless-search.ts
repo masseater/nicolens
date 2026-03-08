@@ -5,15 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo } from "react";
 
 import { useThumbnailPreload } from "@/entities/video";
-import { searchTaglessVideos, usePrefetchTaglessPages } from "@/shared/api";
+import { searchTaglessVideos, taglessKeys, usePrefetchTaglessPages } from "@/shared/api";
 import { useViewMode } from "@/shared/hooks";
-import {
-  JST_OFFSET_HOURS,
-  MINUTES_PER_HOUR,
-  MS_PER_SECOND,
-  SECONDS_PER_MINUTE,
-  calcPageOnLimitChange,
-} from "@/shared/lib";
+import { calcPageOnLimitChange, parseTaglessParams } from "@/shared/lib";
 import type {
   SearchFilters,
   SortField,
@@ -27,56 +21,6 @@ import type {
 const FIRST_PAGE = 1;
 const DEFAULT_LIMIT = 50;
 const INITIAL_TOTAL_COUNT = 0;
-const MONTH_OFFSET = 1;
-const PAD_WIDTH = 2;
-
-const JST_OFFSET_MS = JST_OFFSET_HOURS * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SECOND;
-
-const taglessKeys = {
-  all: ["tagless"] as const,
-  query: (state: TaglessSearchState) => [...taglessKeys.all, state] as const,
-};
-
-const getCurrentMonth = (): string => {
-  const now = new Date();
-  const jst = new Date(now.getTime() + JST_OFFSET_MS);
-  const year = jst.getUTCFullYear();
-  const month = String(jst.getUTCMonth() + MONTH_OFFSET).padStart(PAD_WIDTH, "0");
-  return `${String(year)}-${month}`;
-};
-
-const parseOptionalNumber = (raw: string | null): number | undefined => {
-  if (raw === null) {
-    return undefined;
-  }
-  return Number(raw);
-};
-
-const parseFilters = (params: URLSearchParams): SearchFilters => ({
-  viewCounterGte: parseOptionalNumber(params.get("vcGte")),
-  viewCounterLte: parseOptionalNumber(params.get("vcLte")),
-  commentCounterGte: parseOptionalNumber(params.get("ccGte")),
-  commentCounterLte: parseOptionalNumber(params.get("ccLte")),
-  mylistCounterGte: parseOptionalNumber(params.get("mlGte")),
-  mylistCounterLte: parseOptionalNumber(params.get("mlLte")),
-  likeCounterGte: parseOptionalNumber(params.get("lkGte")),
-  likeCounterLte: parseOptionalNumber(params.get("lkLte")),
-  lengthSecondsGte: parseOptionalNumber(params.get("lsGte")),
-  lengthSecondsLte: parseOptionalNumber(params.get("lsLte")),
-  startTimeGte: params.get("stGte") ?? undefined,
-  startTimeLte: params.get("stLte") ?? undefined,
-  genre: params.get("genre") ?? undefined,
-});
-
-const parseState = (params: URLSearchParams): TaglessSearchState => ({
-  query: params.get("q") ?? "",
-  month: params.get("month") ?? getCurrentMonth(),
-  sortField: (params.get("sort") as SortField | null) ?? "viewCounter", // oxlint-disable-line @typescript-eslint/no-unsafe-type-assertion
-  sortOrder: (params.get("order") as SortOrder | null) ?? "-", // oxlint-disable-line @typescript-eslint/no-unsafe-type-assertion
-  page: Number(params.get("page") ?? String(FIRST_PAGE)),
-  limit: Number(params.get("limit") ?? String(DEFAULT_LIMIT)),
-  filters: parseFilters(params),
-});
 
 const setIfDefined = (
   params: URLSearchParams,
@@ -170,6 +114,9 @@ const useTaglessQuery = (state: TaglessSearchState) =>
     placeholderData: keepPreviousData,
   });
 
+const isEffectivelyLoading = (query: ReturnType<typeof useTaglessQuery>): boolean =>
+  query.isLoading || query.isPlaceholderData;
+
 const useTaglessNavigate = () => {
   const router = useRouter();
   return useCallback(
@@ -247,26 +194,28 @@ const usePaginationHandlers = (
 };
 
 const useTaglessData = (state: TaglessSearchState) => {
-  const { data, isLoading, error, refetch } = useTaglessQuery(state);
-  const results = data?.data ?? [];
-  const totalCount = data?.meta.totalCount ?? INITIAL_TOTAL_COUNT;
+  const query = useTaglessQuery(state);
+  const results = query.data?.data ?? [];
+  const totalCount = query.data?.meta.totalCount ?? INITIAL_TOTAL_COUNT;
+  const loading = isEffectivelyLoading(query);
 
   useThumbnailPreload(results);
   usePrefetchTaglessPages(state, totalCount);
 
+  const { refetch } = query;
   const handleRetry = useCallback(() => {
     void refetch();
   }, [refetch]);
 
-  return { results, totalCount, isLoading, error, handleRetry };
+  return { results, totalCount, loading, error: query.error, handleRetry };
 };
 
 export const useTaglessSearch = (): TaglessSearchResult => {
   const searchParams = useSearchParams();
   const params = searchParams ?? EMPTY_PARAMS;
-  const state = useMemo(() => parseState(params), [params]);
+  const state = useMemo(() => parseTaglessParams(params), [params]);
 
-  const { results, totalCount, isLoading, error, handleRetry } = useTaglessData(state);
+  const { results, totalCount, loading, error, handleRetry } = useTaglessData(state);
   const viewMode = useViewMode((store) => store.viewMode);
   const handleViewModeChange = useViewMode((store) => store.setViewMode);
   const navigate = useTaglessNavigate();
@@ -277,7 +226,7 @@ export const useTaglessSearch = (): TaglessSearchResult => {
     state,
     results,
     totalCount,
-    loading: isLoading,
+    loading,
     error: error === null ? null : getErrorMessage(error),
     viewMode,
     handleViewModeChange,

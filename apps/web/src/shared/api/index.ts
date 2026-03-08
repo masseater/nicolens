@@ -1,3 +1,5 @@
+export { getQueryClient } from "./get-query-client";
+export { searchKeys, semanticSearchKeys, taglessKeys } from "./query-keys";
 export { searchVideos } from "./search";
 export { embedVideos, searchSemantic } from "./semantic-search";
 export { searchTaglessVideos } from "./tagless";

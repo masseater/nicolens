@@ -5,17 +5,13 @@ import { useEffect } from "react";
 
 import type { SnapshotSearchResponse, TaglessSearchState } from "@/shared/types";
 
+import { taglessKeys } from "./query-keys";
 import { searchTaglessVideos } from "./tagless";
 
 const FIRST_PAGE = 1;
 const NO_PAGES = 0;
 const PAGE_STEP = 1;
 const MIN_TOTAL_COUNT = 0;
-
-const taglessKeys = {
-  all: ["tagless"] as const,
-  query: (state: TaglessSearchState) => [...taglessKeys.all, state] as const,
-};
 
 /**
  * Prefetch adjacent tagless pages (prev/next) so that pagination feels instant.

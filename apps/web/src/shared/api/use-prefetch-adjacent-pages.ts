@@ -5,8 +5,8 @@ import { useEffect } from "react";
 
 import type { SearchState, SnapshotSearchResponse } from "@/shared/types";
 
+import { searchKeys } from "./query-keys";
 import { searchVideos } from "./search";
-import { searchKeys } from "./use-search-query";
 
 const FIRST_PAGE = 1;
 const NO_PAGES = 0;

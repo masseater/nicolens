@@ -1,5 +1,7 @@
 import type { SearchFilters, SearchState, SnapshotSearchResponse } from "@/shared/types";
 
+import { getApiBaseUrl } from "./base-url";
+
 const HTTP_BAD_REQUEST = 400;
 const HTTP_SERVICE_UNAVAILABLE = 503;
 const PAGE_OFFSET_BASE = 1;
@@ -120,7 +122,7 @@ const buildSearchUrl = (params: URLSearchParams, state: SearchState): string => 
   const filterStr = buildApiFilters(state.filters);
   const tagFilterStr = buildTagFilters(state.tags);
   const extraParts = [filterStr, tagFilterStr].filter((part) => part !== "").join("&");
-  return `/api/search?${params.toString()}${extraParts === "" ? "" : `&${extraParts}`}`;
+  return `${getApiBaseUrl()}/api/search?${params.toString()}${extraParts === "" ? "" : `&${extraParts}`}`;
 };
 
 // Search videos using the Niconico Snapshot API

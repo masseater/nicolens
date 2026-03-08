@@ -1,5 +1,7 @@
 import type { SemanticSearchResponse, SemanticSearchState } from "@/shared/types";
 
+import { getApiBaseUrl } from "./base-url";
+
 const PAGE_OFFSET_BASE = 1;
 
 const parseSemanticResponse = async (response: Response): Promise<SemanticSearchResponse> => {
@@ -19,7 +21,7 @@ export const searchSemantic = async (
     limit: String(state.limit),
   });
 
-  const response = await fetch(`/api/semantic-search?${params.toString()}`);
+  const response = await fetch(`${getApiBaseUrl()}/api/semantic-search?${params.toString()}`);
 
   if (!response.ok) {
     const body: { error?: string } | null = await response.json().catch(() => null); // oxlint-disable-line @typescript-eslint/no-unsafe-assignment
@@ -46,7 +48,7 @@ export const embedVideos = async (
   }[],
 ): Promise<void> => {
   try {
-    await fetch("/api/embed", {
+    await fetch(`${getApiBaseUrl()}/api/embed`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ videos }),

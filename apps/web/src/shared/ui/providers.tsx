@@ -1,29 +1,13 @@
 "use client";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 
-import { MINUTES_PER_HOUR, MS_PER_SECOND, SECONDS_PER_MINUTE } from "@/shared/lib/constants";
-
-const HOURS_PER_DAY = 24;
-const MS_PER_DAY = HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SECOND;
-const GC_MULTIPLIER = 2;
+import { getQueryClient } from "@/shared/api/get-query-client";
 
 export const Providers = function Providers({ children }: { children: ReactNode }) {
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            staleTime: MS_PER_DAY,
-            gcTime: MS_PER_DAY * GC_MULTIPLIER,
-            refetchOnWindowFocus: false,
-            refetchOnReconnect: false,
-          },
-        },
-      }),
-  );
+  const queryClient = getQueryClient();
 
   return (
     <QueryClientProvider client={queryClient}>
