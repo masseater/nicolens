@@ -113,11 +113,11 @@ const GuideSection = ({ items }: { items: GuideItem[] }) => (
             <Link
               key={ex.query}
               href={searchUrl(ex.query)}
-              className="group inline-flex items-center gap-2 rounded-lg border bg-background px-3 py-1.5 font-mono text-sm transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+              className="group inline-flex items-center gap-1.5 rounded-lg border bg-background px-2.5 py-1.5 font-mono text-xs transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary sm:gap-2 sm:px-3 sm:text-sm"
             >
-              <Search className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
-              <span>{ex.query}</span>
-              <span className="font-sans text-xs text-muted-foreground transition-colors group-hover:text-primary/60">
+              <Search className="size-3 shrink-0 text-muted-foreground transition-colors group-hover:text-primary sm:size-3.5" />
+              <span className="break-all sm:break-normal">{ex.query}</span>
+              <span className="hidden font-sans text-xs text-muted-foreground transition-colors group-hover:text-primary/60 sm:inline">
                 {ex.label}
               </span>
             </Link>
@@ -148,7 +148,7 @@ const LimitationSection = () => (
 );
 
 export const SearchGuide = () => (
-  <div className="w-full rounded-xl border bg-card px-6 py-5">
+  <div className="w-full rounded-xl border bg-card px-4 py-4 sm:px-6 sm:py-5">
     <div className="space-y-6">
       <GuideSection items={basicGuide} />
       <div className="border-t pt-4">

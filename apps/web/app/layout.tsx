@@ -38,7 +38,7 @@ const RootLayout = ({
     <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
       <Providers>
         <AppHeader />
-        <main>{children}</main>
+        <main className="h-[calc(100svh-var(--header-height))]">{children}</main>
       </Providers>
     </body>
   </html>

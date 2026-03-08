@@ -27,7 +27,7 @@ export const SearchPage = () => {
   );
 
   return (
-    <div className="mx-auto flex h-[calc(100svh-var(--header-height))] max-w-[1920px] flex-col overflow-hidden px-4">
+    <div className="mx-auto flex h-full max-w-[1920px] flex-col overflow-hidden px-4">
       <div className="shrink-0 border-b border-border py-3">
         <SearchForm
           defaultValue={formatQueryDisplay(

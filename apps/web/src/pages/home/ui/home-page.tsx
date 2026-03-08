@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
-import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { type RefObject, useCallback, useEffect, useRef } from "react";
 
 import { SavedSearchesList } from "@/features/saved-searches";
 import { SearchForm } from "@/features/search-form";
@@ -92,13 +92,13 @@ const PageOneContent = ({
   placeholderRef: RefObject<HTMLDivElement | null>;
   onScrollToGuide: () => void;
 }) => (
-  <div className="flex h-[calc(100svh-var(--header-height))] snap-start flex-col items-center pb-[var(--header-height)]">
+  <div className="flex h-full snap-start flex-col items-center pb-[var(--header-height)]">
     <div className="flex-1" />
     {/* Invisible placeholder — the fixed form visually sits here */}
-    <div ref={placeholderRef} className="w-full max-w-2xl px-4 py-2">
+    <div ref={placeholderRef} className="w-full max-w-2xl px-3 py-2 sm:px-4">
       <div className="h-12" />
     </div>
-    <div className="flex w-full max-w-2xl flex-col gap-4 px-4 pt-8">
+    <div className="flex w-full max-w-2xl flex-col gap-3 px-3 pt-6 sm:gap-4 sm:px-4 sm:pt-8">
       <SavedSearchesList />
       <SearchHistory />
     </div>
@@ -116,24 +116,13 @@ const PageOneContent = ({
 );
 
 const PageTwoContent = ({ guideRef }: { guideRef: RefObject<HTMLDivElement | null> }) => (
-  <div ref={guideRef} className="min-h-[calc(100svh-var(--header-height))] snap-start">
+  <div ref={guideRef} className="min-h-full snap-start">
     <div className="h-16" />
-    <div className="mx-auto w-full max-w-2xl px-4 pt-4 pb-16">
+    <div className="mx-auto w-full max-w-2xl px-3 pt-4 pb-16 sm:px-4">
       <SearchGuide />
     </div>
   </div>
 );
-
-const OVERFLOW_HIDDEN = "overflow-hidden";
-
-const useBodyOverflowHidden = () => {
-  useLayoutEffect(() => {
-    document.body.classList.add(OVERFLOW_HIDDEN);
-    return () => {
-      document.body.classList.remove(OVERFLOW_HIDDEN);
-    };
-  }, []);
-};
 
 export const HomePage = () => {
   const guideRef = useRef<HTMLDivElement>(null);
@@ -141,7 +130,6 @@ export const HomePage = () => {
   const placeholderRef = useRef<HTMLDivElement>(null);
   const formWrapperRef = useRef<HTMLDivElement>(null);
 
-  useBodyOverflowHidden();
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
   }, []);
@@ -156,14 +144,11 @@ export const HomePage = () => {
   }, []);
 
   return (
-    <div
-      ref={scrollRef}
-      className="relative h-[calc(100svh-var(--header-height))] snap-y snap-mandatory overflow-y-auto"
-    >
+    <div ref={scrollRef} className="relative h-full snap-y snap-mandatory overflow-y-auto">
       {/* Single fixed SearchForm — center on page 1, slide from top on page 2 */}
       <div
         ref={formWrapperRef}
-        className="fixed left-1/2 z-sticky w-full max-w-2xl -translate-x-1/2 bg-background px-4 py-3"
+        className="fixed left-1/2 z-sticky w-full max-w-2xl -translate-x-1/2 bg-background px-3 py-2 sm:px-4 sm:py-3"
       >
         <SearchForm />
       </div>

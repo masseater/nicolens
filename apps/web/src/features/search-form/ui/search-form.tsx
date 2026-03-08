@@ -122,18 +122,18 @@ const SearchActions = ({ isLarge, onSemantic, onTagless }: SearchActionsProps) =
     <Button
       type="button"
       variant="secondary"
-      size={isLarge ? "lg" : "sm"}
-      className={isLarge ? "h-12 whitespace-nowrap" : "whitespace-nowrap"}
+      size={isLarge ? "default" : "sm"}
+      className="whitespace-nowrap text-xs sm:text-sm"
       onClick={onSemantic}
     >
-      <Brain className={isLarge ? "mr-2 size-5" : "mr-1 size-4"} />
+      <Brain className="mr-1 size-4" />
       意味合い検索
     </Button>
     <Button
       type="button"
       variant="secondary"
-      size={isLarge ? "lg" : "sm"}
-      className={isLarge ? "h-12 whitespace-nowrap" : "whitespace-nowrap"}
+      size={isLarge ? "default" : "sm"}
+      className="whitespace-nowrap text-xs sm:text-sm"
       onClick={onTagless}
     >
       タグなしで検索
@@ -153,24 +153,28 @@ export const SearchForm = ({ defaultValue = "", size = "lg" }: SearchFormProps) 
 
   return (
     <form action={handleSubmit} className="flex w-full flex-col gap-2">
-      <div className="flex w-full flex-wrap items-center gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <Input
-            ref={inputRef}
-            type="search"
-            placeholder="動画を検索..."
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              clearError();
-            }}
-            className={isLarge ? "h-12 text-lg" : "h-9"}
-          />
-          <Button type="submit" size={isLarge ? "lg" : "sm"} className={isLarge ? "h-12 px-6" : ""}>
-            <Search className={isLarge ? "mr-2 size-5" : "mr-1 size-4"} />
-            検索
-          </Button>
-        </div>
+      <div className="flex w-full items-center gap-2">
+        <Input
+          ref={inputRef}
+          type="search"
+          placeholder="動画を検索..."
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            clearError();
+          }}
+          className={isLarge ? "h-10 sm:h-12 sm:text-lg" : "h-9"}
+        />
+        <Button
+          type="submit"
+          size={isLarge ? "lg" : "sm"}
+          className={isLarge ? "h-10 px-4 sm:h-12 sm:px-6" : ""}
+        >
+          <Search className={isLarge ? "size-5" : "mr-1 size-4"} />
+          <span className="hidden sm:inline">検索</span>
+        </Button>
+      </div>
+      <div className="flex items-center gap-2">
         <SearchActions
           isLarge={isLarge}
           onSemantic={handleSubmitSemantic}
