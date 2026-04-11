@@ -3,10 +3,12 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { getDb, videoEmbeddings } from "@/shared/db";
 import { generateDocumentEmbedding } from "@/shared/lib/embedding";
+import { recordUsage } from "@/shared/lib/usage-monitor";
 import type { VideoContent } from "@/shared/types";
 
 const HTTP_BAD_REQUEST = 400;
 const HTTP_INTERNAL_ERROR = 500;
+const HTTP_SERVICE_UNAVAILABLE = 503;
 const RATE_LIMIT_MS = 100;
 const EXISTING_CHECK_LIMIT = 1;
 const NO_EXISTING = 0;
@@ -43,6 +45,11 @@ const embedAndStore = async (video: VideoContent): Promise<void> => {
     .limit(EXISTING_CHECK_LIMIT);
 
   if (existing.length > NO_EXISTING) {
+    return;
+  }
+
+  const usage = recordUsage();
+  if (!usage.allowed) {
     return;
   }
 
@@ -100,6 +107,14 @@ export const POST = async (request: NextRequest) => {
       return NextResponse.json(
         { error: "Invalid request: expected { videos: VideoContent[] }" },
         { status: HTTP_BAD_REQUEST },
+      );
+    }
+
+    const preCheck = recordUsage();
+    if (!preCheck.allowed) {
+      return NextResponse.json(
+        { error: "API利用制限に達しました。明日再度お試しください。" },
+        { status: HTTP_SERVICE_UNAVAILABLE },
       );
     }
 

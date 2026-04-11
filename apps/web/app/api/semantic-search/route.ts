@@ -4,10 +4,12 @@ import { type NextRequest, NextResponse } from "next/server";
 import { getDb, videoEmbeddings } from "@/shared/db";
 import { getSecondsUntilNextSnapshot, isCacheStillValid } from "@/shared/lib";
 import { generateQueryEmbedding } from "@/shared/lib/embedding";
+import { recordUsage } from "@/shared/lib/usage-monitor";
 import type { SemanticSearchResponse } from "@/shared/types";
 
 const HTTP_BAD_REQUEST = 400;
 const HTTP_INTERNAL_ERROR = 500;
+const HTTP_SERVICE_UNAVAILABLE = 503;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const DEFAULT_PAGE = 1;
@@ -112,7 +114,11 @@ const executeSemanticSearch = async (params: {
   query: string;
   page: number;
   limit: number;
-}): Promise<SemanticSearchResponse> => {
+}): Promise<SemanticSearchResponse | null> => {
+  const usage = recordUsage();
+  if (!usage.allowed) {
+    return null;
+  }
   const queryEmbedding = await generateQueryEmbedding(params.query);
   const vecStr = toVectorString(queryEmbedding);
   const db = getDb();
@@ -141,7 +147,21 @@ const executeSemanticSearch = async (params: {
   };
 };
 
-const processSemanticRequest = async (searchParams: URLSearchParams): Promise<NextResponse> => {
+const buildSemanticResponse = async (
+  params: { query: string; page: number; limit: number },
+  cacheKey: string,
+): Promise<NextResponse> => {
+  const response = await executeSemanticSearch(params);
+  if (response === null) {
+    return NextResponse.json(
+      { error: "API利用制限に達しました。明日再度お試しください。" },
+      { status: HTTP_SERVICE_UNAVAILABLE },
+    );
+  }
+  return storeSemanticCache(cacheKey, response);
+};
+
+const processSemanticRequest = (searchParams: URLSearchParams): Promise<NextResponse> => {
   const params = parseParams(searchParams);
   if (params === null) {
     return NextResponse.json(
@@ -156,8 +176,7 @@ const processSemanticRequest = async (searchParams: URLSearchParams): Promise<Ne
     return cachedResponse;
   }
 
-  const response = await executeSemanticSearch(params);
-  return storeSemanticCache(cacheKey, response);
+  return buildSemanticResponse(params, cacheKey);
 };
 
 export const GET = async (request: NextRequest) => {
