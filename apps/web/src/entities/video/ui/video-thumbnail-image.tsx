@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useCallback, useState } from "react";
 
 import { toLargeThumbnailUrl } from "../lib/video-url";
@@ -44,13 +43,15 @@ export const VideoThumbnailImage = ({
           <span className="text-xs text-muted-foreground">読み込み中...</span>
         </div>
       )}
-      <Image
+      {/* oxlint-disable-next-line nextjs/no-img-element -- intentionally avoid next/image to eliminate Vercel Image Optimization costs */}
+      <img
         src={imgSrc}
         alt={alt}
         width={width}
         height={height}
         className={`${className ?? ""} transition-opacity duration-300 ${isLoaded ? "opacity-100" : "opacity-0"}`}
         loading="lazy"
+        decoding="async"
         onError={handleError}
         onLoad={handleLoad}
       />

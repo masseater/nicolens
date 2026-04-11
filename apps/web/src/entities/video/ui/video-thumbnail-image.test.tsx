@@ -1,10 +1,5 @@
 import { render, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-
-vi.mock("next/image", () => ({
-  // oxlint-disable-next-line jsx-a11y/alt-text, nextjs/no-img-element
-  default: (props: React.ImgHTMLAttributes<HTMLImageElement>) => <img {...props} />,
-}));
+import { describe, expect, it } from "vitest";
 
 import { VideoThumbnailImage } from "./video-thumbnail-image";
 
