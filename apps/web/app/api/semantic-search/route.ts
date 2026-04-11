@@ -161,7 +161,9 @@ const buildSemanticResponse = async (
   return storeSemanticCache(cacheKey, response);
 };
 
-const processSemanticRequest = (searchParams: URLSearchParams): Promise<NextResponse> => {
+const processSemanticRequest = (
+  searchParams: URLSearchParams,
+): NextResponse | Promise<NextResponse> => {
   const params = parseParams(searchParams);
   if (params === null) {
     return NextResponse.json(

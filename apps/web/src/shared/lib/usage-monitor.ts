@@ -14,7 +14,9 @@ const getDailyLimit = (): number => {
     return DEFAULT_DAILY_LIMIT;
   }
   const parsed = Number(env);
-  return Number.isFinite(parsed) && parsed > INITIAL_COUNT ? Math.floor(parsed) : DEFAULT_DAILY_LIMIT;
+  return Number.isFinite(parsed) && parsed > INITIAL_COUNT
+    ? Math.floor(parsed)
+    : DEFAULT_DAILY_LIMIT;
 };
 
 const getJstDateString = (): string => {
@@ -43,7 +45,9 @@ export const recordUsage = (): { allowed: boolean } => {
 
   if (requestCount >= limit) {
     // oxlint-disable-next-line no-console -- intentional: alert visible in Vercel logs for cost monitoring
-    console.error(`[usage-monitor] Gemini API daily limit reached: ${String(requestCount)}/${String(limit)} (${currentDate})`);
+    console.error(
+      `[usage-monitor] Gemini API daily limit reached: ${String(requestCount)}/${String(limit)} (${currentDate})`,
+    );
     return { allowed: false };
   }
 
@@ -52,7 +56,9 @@ export const recordUsage = (): { allowed: boolean } => {
   const ratio = requestCount / limit;
   if (ratio >= WARN_THRESHOLD) {
     // oxlint-disable-next-line no-console -- intentional: alert visible in Vercel logs for cost monitoring
-    console.warn(`[usage-monitor] Gemini API usage at ${String(Math.round(ratio * PERCENTAGE_SCALE))}%: ${String(requestCount)}/${String(limit)} (${currentDate})`);
+    console.warn(
+      `[usage-monitor] Gemini API usage at ${String(Math.round(ratio * PERCENTAGE_SCALE))}%: ${String(requestCount)}/${String(limit)} (${currentDate})`,
+    );
   }
 
   return { allowed: true };

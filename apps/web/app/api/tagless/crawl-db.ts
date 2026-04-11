@@ -78,9 +78,7 @@ const cleanupOldMonths = async (): Promise<void> => {
   const cutoff = getRetentionCutoff();
 
   const allStatuses = await db.select({ month: taglessCrawlStatus.month }).from(taglessCrawlStatus);
-  const oldMonths = allStatuses
-    .map((row) => row.month)
-    .filter((month) => month < cutoff);
+  const oldMonths = allStatuses.map((row) => row.month).filter((month) => month < cutoff);
 
   if (oldMonths.length === NO_OLD_MONTHS) {
     return;
@@ -90,7 +88,9 @@ const cleanupOldMonths = async (): Promise<void> => {
   await db.delete(taglessCrawlStatus).where(inArray(taglessCrawlStatus.month, oldMonths));
 
   // oxlint-disable-next-line no-console -- intentional: cleanup log visible in Vercel logs
-  console.info(`[crawl-db] Cleaned up ${String(oldMonths.length)} old month(s): ${oldMonths.join(", ")}`);
+  console.info(
+    `[crawl-db] Cleaned up ${String(oldMonths.length)} old month(s): ${oldMonths.join(", ")}`,
+  );
 };
 
 const checkStorageUsage = async (): Promise<void> => {
@@ -103,7 +103,9 @@ const checkStorageUsage = async (): Promise<void> => {
 
   if (sizeMb > STORAGE_WARN_MB) {
     // oxlint-disable-next-line no-console -- intentional: storage alert visible in Vercel logs
-    console.warn(`[crawl-db] DB storage at ${String(Math.round(sizeMb))}MB — approaching Neon free tier limit (500MB)`);
+    console.warn(
+      `[crawl-db] DB storage at ${String(Math.round(sizeMb))}MB — approaching Neon free tier limit (500MB)`,
+    );
   }
 };
 
