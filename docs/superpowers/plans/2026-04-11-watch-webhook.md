@@ -38,12 +38,26 @@
 |------|---------------|
 | `.github/workflows/watch.yml` | Daily cron: clone → notify |
 
+### Deleted Files
+
+| Path | Reason |
+|------|--------|
+| `apps/web/src/shared/db/schema.ts` | `packages/db` に移動 |
+| `apps/web/src/shared/db/connection.ts` | `packages/db` に移動 |
+| `apps/web/src/shared/db/index.ts` | `packages/db` に移動。re-export は作らない |
+| `apps/web/drizzle.config.ts` | `packages/db` に移動 |
+
 ### Modified Files
 
 | Path | Change |
 |------|--------|
-| `apps/web/src/shared/db/` | `@nicolens/db` の re-export に変更 |
-| `apps/web/package.json` | `@nicolens/db` dependency 追加 |
+| `apps/web/package.json` | `@nicolens/db` dependency 追加、db:* scripts を packages/db に委譲 |
+| `apps/web/app/api/tagless/tagless-filters.ts` | `@/shared/db` → `@nicolens/db` |
+| `apps/web/app/api/tagless/route.ts` | `@/shared/db` → `@nicolens/db` |
+| `apps/web/app/api/tagless/crawl-db.ts` | `@/shared/db` → `@nicolens/db` |
+| `apps/web/app/api/tagless/route.test.ts` | `@/shared/db` → `@nicolens/db` |
+| `apps/web/app/api/semantic-search/route.ts` | `@/shared/db` → `@nicolens/db` |
+| `apps/web/app/api/embed/route.ts` | `@/shared/db` → `@nicolens/db` |
 | `apps/web/src/pages/search/ui/search-page.tsx` | WatchButton 追加 |
 | `turbo.json` | clone, notify の task 追加 |
 
@@ -58,8 +72,10 @@
 - Create: `packages/db/src/connection.ts` (moved from `apps/web/src/shared/db/connection.ts`)
 - Create: `packages/db/src/index.ts`
 - Create: `packages/db/drizzle.config.ts` (moved from `apps/web/drizzle.config.ts`)
-- Modify: `apps/web/src/shared/db/index.ts` — re-export from `@nicolens/db`
-- Modify: `apps/web/package.json` — add `@nicolens/db` dep
+- Delete: `apps/web/src/shared/db/` (ディレクトリごと削除)
+- Delete: `apps/web/drizzle.config.ts`
+- Modify: `apps/web/package.json` — `@nicolens/db` dep 追加、db:* scripts 変更
+- Modify: 6 files — `@/shared/db` → `@nicolens/db` にインポート変更
 
 - [ ] **Step 1: Create packages/db/package.json**
 
@@ -142,45 +158,87 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 7: Update apps/web/src/shared/db/index.ts to re-export**
+- [ ] **Step 7: Delete apps/web/src/shared/db/ entirely**
 
-Replace the content of `apps/web/src/shared/db/index.ts` with:
-
-```typescript
-export {
-  getDb,
-  taglessCrawlStatus,
-  taglessVideos,
-  videoEmbeddings,
-} from "@nicolens/db";
+```bash
+rm -rf apps/web/src/shared/db/
+rm apps/web/drizzle.config.ts
 ```
 
-This preserves all existing import paths in `apps/web` (`@/shared/db` still works).
-
-- [ ] **Step 8: Add @nicolens/db to apps/web/package.json dependencies**
+- [ ] **Step 8: Add @nicolens/db to apps/web/package.json**
 
 Add to `dependencies`:
-
 ```json
 "@nicolens/db": "workspace:*"
 ```
 
-- [ ] **Step 9: Install and verify**
+Update db scripts to delegate to packages/db:
+```json
+"db:generate": "pnpm --filter @nicolens/db db:generate",
+"db:migrate": "pnpm --filter @nicolens/db db:migrate",
+"db:push": "pnpm --filter @nicolens/db db:push",
+"db:studio": "pnpm --filter @nicolens/db db:studio"
+```
+
+Remove `drizzle-kit` from `apps/web/devDependencies` (now in `packages/db`).
+
+- [ ] **Step 9: Update all imports from @/shared/db to @nicolens/db**
+
+6 files to update. In each file, replace the import:
+
+`apps/web/app/api/tagless/tagless-filters.ts`:
+```typescript
+// before: import { taglessVideos } from "@/shared/db";
+import { taglessVideos } from "@nicolens/db";
+```
+
+`apps/web/app/api/tagless/route.ts`:
+```typescript
+// before: import { getDb, taglessVideos } from "@/shared/db";
+import { getDb, taglessVideos } from "@nicolens/db";
+```
+
+`apps/web/app/api/tagless/crawl-db.ts`:
+```typescript
+// before: import { getDb, taglessCrawlStatus, taglessVideos } from "@/shared/db";
+import { getDb, taglessCrawlStatus, taglessVideos } from "@nicolens/db";
+```
+
+`apps/web/app/api/tagless/route.test.ts`:
+```typescript
+// before: import { getDb } from "@/shared/db";
+import { getDb } from "@nicolens/db";
+// Also update vi.mock path: vi.mock("@nicolens/db", ...)
+```
+
+`apps/web/app/api/semantic-search/route.ts`:
+```typescript
+// before: import { getDb, videoEmbeddings } from "@/shared/db";
+import { getDb, videoEmbeddings } from "@nicolens/db";
+```
+
+`apps/web/app/api/embed/route.ts`:
+```typescript
+// before: import { getDb, videoEmbeddings } from "@/shared/db";
+import { getDb, videoEmbeddings } from "@nicolens/db";
+```
+
+- [ ] **Step 10: Install and verify**
 
 Run: `pnpm install`
 Run: `pnpm typecheck`
-Expected: No errors. All existing `@/shared/db` imports resolve through the re-export.
+Expected: No errors. All imports resolve to `@nicolens/db`.
 
-- [ ] **Step 10: Verify DB operations still work**
+- [ ] **Step 11: Verify DB operations**
 
 Run: `pnpm --filter @nicolens/db db:push`
-Expected: No schema changes detected (tables already exist).
+Expected: No schema changes (tables already exist).
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
-git add packages/db/ apps/web/src/shared/db/index.ts apps/web/package.json pnpm-lock.yaml
-git commit -m "refactor: extract database layer to packages/db"
+git add packages/db/ apps/web/ pnpm-lock.yaml
+git commit -m "refactor: extract database layer to packages/db, remove apps/web/src/shared/db"
 ```
 
 ---
@@ -267,23 +325,7 @@ export {
 } from "./schema";
 ```
 
-- [ ] **Step 3: Update apps/web/src/shared/db/index.ts re-exports**
-
-Add the new tables:
-
-```typescript
-export {
-  getDb,
-  taglessCrawlStatus,
-  taglessVideos,
-  videoEmbeddings,
-  watchConditions,
-  watchNotifications,
-  watchResults,
-} from "@nicolens/db";
-```
-
-- [ ] **Step 4: Push schema**
+- [ ] **Step 3: Push schema**
 
 Run: `pnpm --filter @nicolens/db db:push`
 Expected: 3 new tables created.
@@ -291,7 +333,7 @@ Expected: 3 new tables created.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/db/src/schema.ts packages/db/src/index.ts apps/web/src/shared/db/index.ts
+git add packages/db/src/schema.ts packages/db/src/index.ts
 git commit -m "feat(db): add watch_conditions, watch_results, watch_notifications tables"
 ```
 
@@ -1004,7 +1046,7 @@ git commit -m "feat: add apps/notify webhook notification service"
 ```typescript
 import { type NextRequest, NextResponse } from "next/server";
 
-import { getDb, watchConditions } from "@/shared/db";
+import { getDb, watchConditions } from "@nicolens/db";
 
 const HTTP_BAD_REQUEST = 400;
 const BLOCKED_HOSTNAMES = new Set(["localhost", "0.0.0.0", "[::1]"]);
@@ -1080,7 +1122,7 @@ export const POST = async (request: NextRequest) => {
 import { type NextRequest, NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 
-import { getDb, watchConditions, watchNotifications } from "@/shared/db";
+import { getDb, watchConditions, watchNotifications } from "@nicolens/db";
 
 const HTTP_NOT_FOUND = 404;
 const HTTP_BAD_REQUEST = 400;
