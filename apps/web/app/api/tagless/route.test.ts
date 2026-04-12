@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock modules BEFORE importing the route
-vi.mock("@/shared/db", () => {
+vi.mock("@nicolens/datastore", () => {
   const col = (name: string) => ({ name });
   return {
     getDb: vi.fn(),
@@ -49,7 +49,7 @@ vi.mock("./tagless-filters", () => ({
   buildWhereConditions: vi.fn().mockReturnValue([]),
 }));
 
-import { getDb } from "@/shared/db";
+import { getDb } from "@nicolens/datastore";
 
 import { GET } from "./route";
 

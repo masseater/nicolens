@@ -1,7 +1,7 @@
+import { getDb, taglessVideos } from "@nicolens/datastore";
 import { type SQL, and, asc, count, desc } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { getDb, taglessVideos } from "@/shared/db";
 import {
   JST_OFFSET_HOURS,
   MINUTES_PER_HOUR,

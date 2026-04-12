@@ -1,7 +1,7 @@
+import { getDb, videoEmbeddings } from "@nicolens/datastore";
 import { sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { getDb, videoEmbeddings } from "@/shared/db";
 import { getSecondsUntilNextSnapshot, isCacheStillValid } from "@/shared/lib";
 import { generateQueryEmbedding } from "@/shared/lib/embedding";
 import { recordUsage } from "@/shared/lib/usage-monitor";

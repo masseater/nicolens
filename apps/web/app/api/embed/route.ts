@@ -1,7 +1,7 @@
+import { getDb, videoEmbeddings } from "@nicolens/datastore";
 import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { getDb, videoEmbeddings } from "@/shared/db";
 import { generateDocumentEmbedding } from "@/shared/lib/embedding";
 import { recordUsage } from "@/shared/lib/usage-monitor";
 import type { VideoContent } from "@/shared/types";

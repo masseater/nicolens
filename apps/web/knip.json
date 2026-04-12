@@ -10,6 +10,7 @@
     "tailwindcss",
     "postcss",
     "eslint-plugin-boundaries",
-    "eslint-import-resolver-typescript"
+    "eslint-import-resolver-typescript",
+    "@nicolens/datastore"
   ]
 }

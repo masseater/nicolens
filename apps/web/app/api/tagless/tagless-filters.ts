@@ -1,6 +1,5 @@
+import { taglessVideos } from "@nicolens/datastore";
 import { type SQL, eq, gte, ilike, isNull, lte, or } from "drizzle-orm";
-
-import { taglessVideos } from "@/shared/db";
 
 export interface ParsedFilters {
   viewCounterGte?: number;

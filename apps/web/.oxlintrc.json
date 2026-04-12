@@ -162,8 +162,7 @@
         "app/**/not-found.tsx",
         "app/**/route.ts",
         "next.config.ts",
-        "postcss.config.mjs",
-        "drizzle.config.ts"
+        "postcss.config.mjs"
       ],
       "rules": {
         "import/no-default-export": "off",

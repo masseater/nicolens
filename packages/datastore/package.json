@@ -1,0 +1,27 @@
+{
+  "name": "@nicolens/datastore",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.1",
+    "postgres": "^3.4.8"
+  },
+  "devDependencies": {
+    "@nicolens/tsconfig": "workspace:*",
+    "@types/node": "^20",
+    "@typescript/native-preview": "7.0.0-dev.20260307.1",
+    "drizzle-kit": "^0.31.9",
+    "typescript": "^5"
+  }
+}

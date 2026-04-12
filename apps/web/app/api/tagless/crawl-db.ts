@@ -1,6 +1,6 @@
+import { getDb, taglessCrawlStatus, taglessVideos } from "@nicolens/datastore";
 import { eq, inArray, sql } from "drizzle-orm";
 
-import { getDb, taglessCrawlStatus, taglessVideos } from "@/shared/db";
 import type { VideoContent } from "@/shared/types";
 
 const DB_INSERT_BATCH_SIZE = 500;

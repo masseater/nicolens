@@ -49,11 +49,11 @@ pnpm --filter @nicolens/web dev
 pnpm --filter @nicolens/web lint
 pnpm --filter @nicolens/web start   # next start (production server)
 
-# Database (run from apps/web/ or use --filter)
-pnpm --filter @nicolens/web db:generate   # drizzle-kit generate
-pnpm --filter @nicolens/web db:migrate    # drizzle-kit migrate
-pnpm --filter @nicolens/web db:push       # drizzle-kit push
-pnpm --filter @nicolens/web db:studio     # drizzle-kit studio
+# Database (lives in packages/datastore)
+pnpm --filter @nicolens/datastore db:generate   # drizzle-kit generate
+pnpm --filter @nicolens/datastore db:migrate    # drizzle-kit migrate
+pnpm --filter @nicolens/datastore db:push       # drizzle-kit push
+pnpm --filter @nicolens/datastore db:studio     # drizzle-kit studio
 
 # Add a shadcn component (run from apps/web/)
 pnpm shadcn add <component-name>
@@ -64,9 +64,10 @@ pnpm shadcn add <component-name>
 pnpm workspace monorepo managed by Turborepo.
 
 ```
-apps/web/          — Next.js 16 app (main application)
-packages/tsconfig/ — Shared TypeScript config
-docs/              — API docs (snapshot-api.md, spec.md, niconico-unofficial-api.md, api-limitations.md, design-system.md)
+apps/web/            — Next.js 16 app (main application)
+packages/datastore/  — Shared database layer (Drizzle schema + connection, used by web and future services)
+packages/tsconfig/   — Shared TypeScript config
+docs/                — API docs (snapshot-api.md, spec.md, niconico-unofficial-api.md, api-limitations.md, design-system.md)
 ```
 
 ## FSD Structure (apps/web/)
@@ -84,7 +85,8 @@ Feature-Sliced Design layers. `app/` はNext.js App Router用（薄いラッパ�
   - `shared/lib/` — Utilities (format helpers, URL search params builder/parser, highlight, query-parser, snapshot-schedule, embedding, export, constants)
   - `shared/ui/` — shadcn components + shared UI (button, card, badge, select, input, label, pagination, dropdown-menu, separator, skeleton-card, providers)
   - `shared/hooks/` — Cross-cutting hooks (`useViewMode`, `useEmbedResults`)
-  - `shared/db/` — PostgreSQL database connection and schema (Drizzle ORM)
+
+Database access (`getDb`, schema tables) is provided by the `@nicolens/datastore` workspace package, not by `src/shared/`.
 
 Slices use internal segments: `ui/`, `model/`, `lib/`, `__tests__/` with `index.ts` as public API (except pages which have no barrel file).
 Import direction: `app → pages → widgets → features → entities → shared` (enforced by oxlint boundaries plugin).
