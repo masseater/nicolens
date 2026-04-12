@@ -1,283 +1,312 @@
-# Watch & Webhook 設計書
+# Tag Watch & Webhook 設計書
 
-Snapshot API の日次更新を検知し、ユーザーごとの検索条件に合致する新着動画を指定の webhook URL へ通知する機能。
+## 概要
 
-## 制約
+2つの独立した機能を組み合わせる:
 
-| 制約 | 値 | 影響 |
-|------|-----|------|
-| GitHub Actions (public) | 月無制限 / ジョブ6時間 | clone/notify の実行環境。タイムアウトの心配不要 |
-| GitHub Actions (private) | 月2,000分 | 1日2ジョブ × 数分 ≈ 月60分。余裕あり |
-| Neon free tier ストレージ | 0.5GB | 通知ログ・cloneデータの保持期間を制限 |
-| Snapshot API レート制限 | レスポンス時間と同等の待機 | 実測100-200ms/リクエスト |
-| Snapshot API の性質 | 検索API (差分APIではない) | startTime フィルタで新着を絞り込む |
-| 認証 | なし | UUID トークンでアクセス制御 |
+1. **Webhook 通知機能** — 登録された Webhook エンドポイントにペイロードを送信する汎用インフラ
+2. **タグ更新検知機能** — 指定タグの新着動画を検知し、Webhook 通知機能を発火させるトリガー
 
 ## モノレポ構成
 
 ```
 nicolens/
   apps/
-    web/       — Next.js app (検索 UI + watch CRUD API)
-    clone/     — Snapshot clone service (API → DB)
-    notify/    — Notification service (DB → webhook)
+    web/       — Next.js app (認証 + Webhook CRUD + Tag Trigger CRUD)
+    clone/     — タグ更新検知 (Snapshot API → watch_results)
+    notify/    — Webhook 送信 (pending_notifications → webhook endpoints)
   packages/
     tsconfig/  — 共有 TypeScript config (既存)
-    db/        — 共有 DB schema + connection
+    datastore/ — 共有 DB schema + connection
 ```
 
-### パッケージ間の依存関係
+### パッケージ間の責務
 
-```mermaid
-flowchart LR
-    Web[apps/web] --> DB[packages/datastore]
-    Clone[apps/clone] --> DB
-    Notify[apps/notify] --> DB
+| App | 知っていること | 知らないこと |
+|-----|-------------|------------|
+| web | ユーザー、Webhook、Tag Trigger | Snapshot API の叩き方、通知の送り方 |
+| clone | タグ、Snapshot API、watch_results | Webhook の存在、通知の送り方 |
+| notify | pending_notifications、Webhook URL | タグ、Snapshot API |
+
+clone は「何が新しいか」を発見し、pending_notifications に書く。notify は「どこに送るか」を処理する。互いを知らない。
+
+## 認証
+
+Auth.js v5 + GitHub OAuth + Drizzle Adapter。
+
+設定: `apps/web/src/shared/auth/config.ts`
+ハンドラ: `app/api/auth/[...nextauth]/route.ts`
+ミドルウェア: `apps/web/middleware.ts` で `/watches`, `/webhooks`, `/api/watches`, `/api/webhooks` を保護
+
+環境変数:
+- `AUTH_SECRET`
+- `AUTH_GITHUB_ID`
+- `AUTH_GITHUB_SECRET`
+
+## データモデル
+
+### Auth.js テーブル (Drizzle Adapter 標準)
+
+```
+users:              id, name, email, emailVerified, image
+accounts:           id, userId, type, provider, providerAccountId, ...
+sessions:           sessionToken (PK), userId, expires
+verificationTokens: identifier + token (composite PK), expires
 ```
 
-- `packages/datastore` は `drizzle-orm` と `postgres` を持ち、schema と connection を export
-- 各 app は `@nicolens/datastore` として import
-- `apps/web` の既存コードは `@/shared/db` → `@nicolens/datastore` に変更
+### webhooks テーブル (汎用通知インフラ)
+
+| カラム | 型 | 説明 |
+|--------|-----|------|
+| id | TEXT (UUID) | PK |
+| user_id | TEXT | FK → users.id |
+| name | TEXT | 表示名 (例: "My Discord") |
+| url | TEXT | エンドポイント URL |
+| format | TEXT | "generic" or "discord" |
+| is_active | BOOLEAN | |
+| created_at | TIMESTAMP | |
+
+INDEX: (user_id)
+
+### tag_triggers テーブル (トリガー)
+
+| カラム | 型 | 説明 |
+|--------|-----|------|
+| id | TEXT (UUID) | PK |
+| user_id | TEXT | FK → users.id |
+| tag | TEXT | 監視対象タグ |
+| webhook_id | TEXT | FK → webhooks.id |
+| is_active | BOOLEAN | |
+| created_at | TIMESTAMP | |
+
+INDEX: (user_id)
+UNIQUE: (user_id, tag, webhook_id)
+
+### watch_results テーブル (clone が書き込み)
+
+| カラム | 型 | 説明 |
+|--------|-----|------|
+| tag | TEXT | タグ名 |
+| content_id | TEXT | 動画 ID |
+| video_data | TEXT | VideoContent の JSON |
+| discovered_at | TIMESTAMP | |
+
+PK: (tag, content_id)
+INDEX: (discovered_at) — クリーンアップ用
+
+### pending_notifications テーブル (clone が書き込み、notify が処理)
+
+clone と notify の間の**キュー**。clone がトリガー条件を評価して通知対象を決定し、pending に書く。notify はそれを読んで送信する。
+
+| カラム | 型 | 説明 |
+|--------|-----|------|
+| id | TEXT (UUID) | PK |
+| webhook_id | TEXT | FK → webhooks.id |
+| payload | TEXT | 送信する JSON ペイロード |
+| created_at | TIMESTAMP | |
+
+INDEX: (created_at)
+
+### notification_log テーブル (notify が書き込み)
+
+| カラム | 型 | 説明 |
+|--------|-----|------|
+| id | TEXT (UUID) | PK |
+| webhook_id | TEXT | FK → webhooks.id |
+| trigger_type | TEXT | "tag" (将来の拡張用) |
+| trigger_id | TEXT | tag_triggers.id |
+| content_id | TEXT | 通知した動画 ID |
+| sent_at | TIMESTAMP | |
+| success | BOOLEAN | |
+
+UNIQUE: (trigger_id, content_id)
+INDEX: (sent_at) — クリーンアップ用
 
 ## アーキテクチャ
-
-### 全体フロー
 
 ```mermaid
 flowchart TB
     subgraph Web["apps/web (Vercel)"]
-        SearchPage[Search Results Page]
-        WatchBtn[Watch Button]
-        WatchAPI[CRUD API]
-        ManagePage[Management Page]
+        Auth[Auth.js GitHub OAuth]
+        WebhookCRUD[Webhook CRUD]
+        TriggerCRUD[Tag Trigger CRUD]
     end
 
-    subgraph GHA["GitHub Actions (daily JST 5:10)"]
-        CloneJob["apps/clone"]
-        NotifyJob["apps/notify"]
+    subgraph Clone["apps/clone (GitHub Actions)"]
+        DetectTags[Detect tag updates]
+        WritePending[Write pending notifications]
+    end
+
+    subgraph Notify["apps/notify (GitHub Actions)"]
+        ReadPending[Read pending notifications]
+        SendWebhook[Send to webhook endpoints]
+        RecordLog[Record to notification log]
     end
 
     subgraph Storage[Neon PostgreSQL]
-        WatchConds[watch_conditions]
+        Webhooks[webhooks]
+        TagTriggers[tag_triggers]
         WatchResults[watch_results]
-        WatchNotifs[watch_notifications]
+        Pending[pending_notifications]
+        Log[notification_log]
     end
 
     subgraph External[External]
         SnapshotAPI[Snapshot API]
-        WebhookDest[Webhook Destinations]
+        Destinations[Webhook Destinations]
     end
 
-    SearchPage --> WatchBtn --> WatchAPI --> WatchConds
-    ManagePage --> WatchAPI
+    Auth --> Web
+    WebhookCRUD --> Webhooks
+    TriggerCRUD --> TagTriggers
 
-    CloneJob -->|read conditions| WatchConds
-    CloneJob -->|fetch videos| SnapshotAPI
-    CloneJob -->|save results| WatchResults
+    DetectTags -->|distinct tags| TagTriggers
+    DetectTags -->|tagsExact search| SnapshotAPI
+    DetectTags --> WatchResults
+    WritePending -->|new videos found| Pending
 
-    NotifyJob -->|read results| WatchResults
-    NotifyJob -->|check history| WatchNotifs
-    NotifyJob -->|send| WebhookDest
-    NotifyJob -->|record| WatchNotifs
-
-    CloneJob -->|needs| NotifyJob
+    ReadPending --> Pending
+    SendWebhook -->|POST| Destinations
+    RecordLog --> Log
 ```
 
-### 処理シーケンス
+### Clone の処理フロー
 
 ```
-GitHub Actions cron (JST 5:10)
-
-Job 1: clone
-  1. DB から is_active=true の全 watch_conditions を取得
-  2. 各 condition について:
-     a. query/targets/filters から snapshot API クエリを組み立て
-     b. startTime >= last_cloned_at を追加 (新着のみ)
-     c. snapshot API を呼び出し (limit=100)
-     d. 結果を watch_results に upsert (onConflictDoNothing)
-     e. condition.last_cloned_at を更新
-  3. 90日以上前の watch_results を削除
-
-Job 2: notify (depends on clone)
-  1. DB から is_active=true の全 watch_conditions を取得
-  2. 各 condition について:
-     a. watch_results から、watch_notifications に無い content_id を取得
-     b. 該当動画が無ければスキップ
-     c. webhook_url へペイロードを POST
-     d. watch_notifications に記録
-  3. 90日以上前の watch_notifications を削除
+1. tag_triggers (is_active=true) の tag を DISTINCT で取得
+2. 各 tag について:
+   a. snapshot API: q={tag}&targets=tagsExact&filters[startTime][gte]={前日JST5:00}
+   b. 結果を watch_results に upsert (onConflictDoNothing)
+3. 各 tag_trigger について:
+   a. watch_results[tag] のうち notification_log[trigger_id] に無い content_id を取得
+   b. 該当動画の webhook_id + ペイロードを pending_notifications に挿入
+4. 90日以上前の watch_results を削除
 ```
 
-## データモデル
+### Notify の処理フロー
 
-### watch_conditions テーブル
+```
+1. pending_notifications の全レコードを取得
+2. 各 pending について:
+   a. webhooks[webhook_id] から url, format を取得
+   b. format に応じてペイロードを整形 (generic/discord)
+   c. url に POST
+   d. notification_log に記録 (success/failure)
+   e. pending_notifications から削除
+3. 90日以上前の notification_log を削除
+```
 
-| カラム | 型 | 説明 |
-|--------|-----|------|
-| id | TEXT (UUID) | PK |
-| token | TEXT (UUID) | 管理ページアクセス用 |
-| label | TEXT | ユーザーが付けるラベル |
-| query | TEXT | 検索キーワード |
-| targets | TEXT | 検索対象フィールド |
-| filters_json | TEXT | startTime 以外のフィルタ (JSON string) |
-| webhook_url | TEXT | 通知先 URL |
-| webhook_format | TEXT | "generic" or "discord" |
-| is_active | BOOLEAN | 一時停止フラグ |
-| last_cloned_at | TIMESTAMP | clone が最後にチェックした日時 |
-| created_at | TIMESTAMP | 作成日時 |
-
-### watch_results テーブル (clone が書き込み、notify が読み取り)
-
-| カラム | 型 | 説明 |
-|--------|-----|------|
-| condition_id | TEXT | FK → watch_conditions.id |
-| content_id | TEXT | ニコニコの動画 ID |
-| video_data | TEXT | VideoContent の JSON string |
-| discovered_at | TIMESTAMP | clone が発見した日時 |
-
-PK: (condition_id, content_id)
-
-### watch_notifications テーブル (notify が書き込み)
-
-| カラム | 型 | 説明 |
-|--------|-----|------|
-| id | TEXT (UUID) | PK |
-| condition_id | TEXT | FK → watch_conditions.id |
-| content_id | TEXT | 通知済み動画 ID |
-| notified_at | TIMESTAMP | 通知送信日時 |
-
-UNIQUE: (condition_id, content_id)
-INDEX: (notified_at) — 古いログ削除用
+notify は Webhook の url と format と payload しか知らない。タグの存在すら知らない。
 
 ## API エンドポイント (apps/web)
 
-### POST /api/watch
+全て認証必須。操作対象は必ず `WHERE user_id = session.user.id` で絞り込み。
 
-条件を新規作成する。
+### Webhooks
 
-### GET /api/watch/[token]
+| Method | Path | 説明 |
+|--------|------|------|
+| GET | /api/webhooks | ユーザーの Webhook 一覧 |
+| POST | /api/webhooks | Webhook 登録 |
+| PATCH | /api/webhooks/[id] | 更新 (name, url, format, isActive) |
+| DELETE | /api/webhooks/[id] | 削除 (紐づく trigger も CASCADE) |
 
-トークンに紐づく条件の詳細 + 直近通知履歴を取得する。
+### Tag Triggers
 
-### PATCH /api/watch/[token]
+| Method | Path | 説明 |
+|--------|------|------|
+| GET | /api/watches | ユーザーの Tag Trigger 一覧 (webhook 情報含む) |
+| POST | /api/watches | Tag Trigger 追加 (tag + webhook_id) |
+| PATCH | /api/watches/[id] | 更新 (isActive) |
+| DELETE | /api/watches/[id] | 削除 |
 
-条件を更新する (label, webhookUrl, is_active 等)。
+## UI
 
-### DELETE /api/watch/[token]
+### ヘッダー
 
-条件を削除する。関連テーブルも CASCADE で削除。
+- 未ログイン: 「GitHubでログイン」ボタン
+- ログイン済み: アバター + ドロップダウン (Webhooks, Tag Watches, ログアウト)
+
+### /webhooks ページ
+
+- Webhook 一覧 (名前、URL マスク、形式、有効/無効)
+- 追加フォーム: 名前 + URL + 形式 (Generic/Discord)
+- テスト送信ボタン (テストペイロードを送信)
+
+### /watches ページ
+
+- Tag Trigger 一覧 (タグ名、送信先 Webhook 名、有効/無効)
+- 追加フォーム: タグ名 + Webhook セレクト (登録済み Webhook から選択)
+- 最近の通知ログ
+
+### 検索結果ページ
+
+タグピルに「監視」アクション追加。ログイン済み + Webhook 登録済みなら、Webhook を選択して即追加。
 
 ## Webhook ペイロード
 
-### Generic 形式
+### Generic
 
 ```json
 {
-  "condition": { "id": "uuid", "label": "VOCALOID新着", "query": "VOCALOID" },
+  "trigger": { "type": "tag", "tag": "VOCALOID" },
   "videos": [
     {
       "contentId": "sm12345678",
-      "title": "Example Title",
+      "title": "Example",
       "url": "https://nico.ms/sm12345678",
       "thumbnailUrl": "https://...",
       "viewCounter": 1234,
-      "startTime": "2026-04-11T10:00:00+09:00"
+      "startTime": "2026-04-12T10:00:00+09:00"
     }
   ],
-  "checkedAt": "2026-04-11T05:10:00+09:00",
+  "sentAt": "2026-04-12T05:10:00+09:00",
   "totalNew": 1
 }
 ```
 
-### Discord 形式
+### Discord
 
-Discord Webhook API の embed 形式に変換。最大10 embeds/メッセージ。超過分は複数回送信。
-
-## UI
-
-### 検索結果ページ
-
-既存ツールバーに Bell アイコンの Watch ボタンを追加。DropdownMenu で:
-1. ラベル入力
-2. Webhook URL 入力
-3. 形式選択 (Generic / Discord)
-4. 保存 → 管理用 URL 表示
-
-### /watch/[token] 管理ページ
-
-条件詳細、有効/無効トグル、最終チェック日時、直近通知履歴、削除ボタン。
+embed 形式。最大10件/メッセージ。
 
 ## セキュリティ
 
-- Webhook URL: SSRF 対策 (private IP 拒否、https only)
-- トークン: UUID v4 (122bit entropy)
-- GitHub Actions: secrets で DATABASE_URL を管理
+- Webhook URL: SSRF 対策
+  - private IP 拒否: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16
+  - IPv6: ::1, fc00::/7 拒否
+  - https only
+- API: 全エンドポイントで auth() + user_id 所有権検証
+- GitHub Actions: secrets で DATABASE_URL 管理
 
-## 実行環境
-
-GitHub Actions cron で実行。Vercel Cron は使わない (10秒制限を回避)。
-
-```yaml
-# .github/workflows/watch.yml
-on:
-  schedule:
-    - cron: '10 20 * * *'  # UTC 20:10 = JST 5:10
-jobs:
-  clone:
-    runs-on: ubuntu-latest
-    steps:
-      - checkout, pnpm install
-      - pnpm --filter @nicolens/clone start
-  notify:
-    needs: clone
-    runs-on: ubuntu-latest
-    steps:
-      - checkout, pnpm install
-      - pnpm --filter @nicolens/notify start
-```
-
-## ファイル配置
+## FSD レイヤー配置
 
 ```
-packages/datastore/
-  src/
-    schema.ts          — 全テーブル定義
-    connection.ts      — getDb()
-    index.ts           — barrel
-  drizzle.config.ts
-  package.json         — @nicolens/datastore
-  tsconfig.json
+src/shared/auth/
+  config.ts                — Auth.js 設定
 
-apps/clone/
-  src/
-    index.ts           — entry: read conditions, fetch API, save results
-    clone-handler.ts   — core logic
-  package.json         — @nicolens/clone
-  tsconfig.json
+src/features/auth/
+  ui/auth-button.tsx       — ログイン/ログアウト
+  ui/user-menu.tsx         — アバター + ドロップダウン
+  index.ts
 
-apps/notify/
-  src/
-    index.ts           — entry: evaluate conditions, send webhooks
-    notify-handler.ts  — core logic
-    webhook-formats.ts — Generic/Discord payload builders
-    webhook-sender.ts  — HTTP sender
-    url-validator.ts   — SSRF prevention
-  package.json         — @nicolens/notify
-  tsconfig.json
+src/features/webhook/
+  ui/webhook-list.tsx      — Webhook 一覧
+  ui/webhook-form.tsx      — Webhook 追加フォーム
+  index.ts
 
-apps/web/
-  app/api/watch/
-    route.ts             — POST (create)
-    [token]/route.ts     — GET/PATCH/DELETE
-  app/watch/[token]/
-    page.tsx             — management page (thin wrapper)
-  src/features/watch/
-    ui/watch-button.tsx  — search results toolbar button
-    index.ts
-  src/pages/watch/
-    ui/watch-page.tsx    — page composition
-    index.ts
+src/features/tag-watch/
+  ui/tag-watch-list.tsx    — Trigger 一覧
+  ui/tag-watch-form.tsx    — Trigger 追加フォーム
+  index.ts
 
-.github/workflows/
-  watch.yml              — cron schedule for clone + notify
+src/pages/webhooks/       — /webhooks ページ
+src/pages/watches/        — /watches ページ
+
+app/api/auth/[...nextauth]/route.ts
+app/api/webhooks/route.ts
+app/api/webhooks/[id]/route.ts
+app/api/watches/route.ts
+app/api/watches/[id]/route.ts
+app/webhooks/page.tsx
+app/watches/page.tsx
 ```
