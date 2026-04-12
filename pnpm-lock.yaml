@@ -151,6 +151,18 @@ importers:
       drizzle-kit:
         specifier: ^0.31.9
         version: 0.31.9
+      knip:
+        specifier: ^5.86.0
+        version: 5.86.0(@types/node@20.19.37)(typescript@5.9.3)
+      oxfmt:
+        specifier: ^0.36.0
+        version: 0.36.0
+      oxlint:
+        specifier: ^1.51.0
+        version: 1.51.0(oxlint-tsgolint@0.16.0)
+      oxlint-tsgolint:
+        specifier: ^0.16.0
+        version: 0.16.0
       typescript:
         specifier: ^5
         version: 5.9.3
