@@ -124,14 +124,30 @@ const fetchNotifiedIds = async (db: Db, triggerId: string): Promise<string[]> =>
   return rows.map((row) => row.contentId);
 };
 
+const fetchPendingIds = async (db: Db, triggerId: string): Promise<string[]> => {
+  const rows = await db
+    .select({ contentId: pendingNotifications.contentId })
+    .from(pendingNotifications)
+    .where(eq(pendingNotifications.triggerId, triggerId));
+  return rows.map((row) => row.contentId);
+};
+
+const dedupeIds = (notified: readonly string[], pending: readonly string[]): string[] => {
+  const set = new Set<string>(notified);
+  for (const id of pending) {
+    set.add(id);
+  }
+  return [...set];
+};
+
 const fetchUnnotifiedResults = async (
   db: Db,
   tag: string,
-  notifiedIds: string[],
+  excludedIds: readonly string[],
 ): Promise<WatchRow[]> => {
   const condition =
-    notifiedIds.length > 0
-      ? and(eq(watchResults.tag, tag), notInArray(watchResults.contentId, notifiedIds))
+    excludedIds.length > 0
+      ? and(eq(watchResults.tag, tag), notInArray(watchResults.contentId, [...excludedIds]))
       : eq(watchResults.tag, tag);
   const rows = await db
     .select({
@@ -202,7 +218,9 @@ const collectNewVideos = async (
   trigger: TagTriggerRow,
 ): Promise<VideoContent[]> => {
   const notifiedIds = await fetchNotifiedIds(ctx.db, trigger.id);
-  const unnotifiedResults = await fetchUnnotifiedResults(ctx.db, trigger.tag, notifiedIds);
+  const pendingIds = await fetchPendingIds(ctx.db, trigger.id);
+  const excludedIds = dedupeIds(notifiedIds, pendingIds);
+  const unnotifiedResults = await fetchUnnotifiedResults(ctx.db, trigger.tag, excludedIds);
   if (unnotifiedResults.length === 0) {
     return [];
   }
