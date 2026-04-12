@@ -52,6 +52,43 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  apps/tag-scanner:
+    dependencies:
+      '@nicolens/datastore':
+        specifier: workspace:*
+        version: link:../../packages/datastore
+      drizzle-orm:
+        specifier: ^0.45.1
+        version: 0.45.1(@neondatabase/serverless@1.0.2)(@types/pg@8.18.0)(postgres@3.4.8)
+    devDependencies:
+      '@nicolens/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
+      '@types/node':
+        specifier: ^20
+        version: 20.19.37
+      '@typescript/native-preview':
+        specifier: 7.0.0-dev.20260307.1
+        version: 7.0.0-dev.20260307.1
+      knip:
+        specifier: ^5.86.0
+        version: 5.86.0(@types/node@20.19.37)(typescript@5.9.3)
+      oxfmt:
+        specifier: ^0.36.0
+        version: 0.36.0
+      oxlint:
+        specifier: ^1.51.0
+        version: 1.51.0(oxlint-tsgolint@0.16.0)
+      oxlint-tsgolint:
+        specifier: ^0.16.0
+        version: 0.16.0
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   apps/web:
     dependencies:
       '@auth/drizzle-adapter':
