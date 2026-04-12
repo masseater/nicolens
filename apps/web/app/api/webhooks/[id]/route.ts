@@ -21,7 +21,10 @@ interface WebhookUpdates {
 const buildUpdatesFromRecord = (record: Record<string, unknown>): WebhookUpdates => {
   const updates: WebhookUpdates = {};
   if (typeof record["name"] === "string") {
-    updates.name = record["name"].trim();
+    const trimmed = record["name"].trim();
+    if (trimmed !== "") {
+      updates.name = trimmed;
+    }
   }
   if (typeof record["isActive"] === "boolean") {
     updates.isActive = record["isActive"];
