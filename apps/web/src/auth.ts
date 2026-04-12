@@ -3,9 +3,8 @@ import { accounts, getDb, sessions, users, verificationTokens } from "@nicolens/
 import NextAuth from "next-auth";
 import GitHub from "next-auth/providers/github";
 
-// eslint-disable-next-line new-cap -- NextAuth and DrizzleAdapter are factory functions
+// oxlint-disable new-cap -- NextAuth and DrizzleAdapter are factory functions, not constructors
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  // eslint-disable-next-line new-cap -- DrizzleAdapter is a factory function
   adapter: DrizzleAdapter(getDb(), {
     usersTable: users,
     accountsTable: accounts,
