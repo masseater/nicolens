@@ -1,0 +1,28 @@
+{
+  "name": "@nicolens/nicovideo-snapshot-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "oxlint -c .oxlintrc.json --deny-warnings --tsconfig tsconfig.json .",
+    "fmt": "oxfmt --ignore-path .oxfmtignore .",
+    "fmt:check": "oxfmt --ignore-path .oxfmtignore --check .",
+    "typecheck": "tsgo --noEmit",
+    "knip": "knip",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@nicolens/tsconfig": "workspace:*",
+    "@types/node": "^20",
+    "@typescript/native-preview": "7.0.0-dev.20260307.1",
+    "knip": "^5.86.0",
+    "oxfmt": "^0.36.0",
+    "oxlint": "^1.51.0",
+    "oxlint-tsgolint": "^0.16.0",
+    "typescript": "^5",
+    "vitest": "^4.0.18"
+  }
+}
