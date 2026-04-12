@@ -30,14 +30,14 @@ nicolens/
 
 ```mermaid
 flowchart LR
-    Web[apps/web] --> DB[packages/db]
+    Web[apps/web] --> DB[packages/datastore]
     Clone[apps/clone] --> DB
     Notify[apps/notify] --> DB
 ```
 
-- `packages/db` は `drizzle-orm` と `postgres` を持ち、schema と connection を export
-- 各 app は `@nicolens/db` として import
-- `apps/web` の既存コードは `@/shared/db` → `@nicolens/db` に変更
+- `packages/datastore` は `drizzle-orm` と `postgres` を持ち、schema と connection を export
+- 各 app は `@nicolens/datastore` として import
+- `apps/web` の既存コードは `@/shared/db` → `@nicolens/datastore` に変更
 
 ## アーキテクチャ
 
@@ -239,13 +239,13 @@ jobs:
 ## ファイル配置
 
 ```
-packages/db/
+packages/datastore/
   src/
     schema.ts          — 全テーブル定義
     connection.ts      — getDb()
     index.ts           — barrel
   drizzle.config.ts
-  package.json         — @nicolens/db
+  package.json         — @nicolens/datastore
   tsconfig.json
 
 apps/clone/

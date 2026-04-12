@@ -4,7 +4,7 @@
 
 **Goal:** Snapshot API の日次更新を監視し、ユーザー定義の検索条件に合致する新着動画を webhook で通知する。clone と notify を独立したマイクロサービスとしてモノレポ内に構成し、GitHub Actions で実行する。
 
-**Architecture:** DB 層を `packages/db` に抽出し、3つのアプリ (`apps/web`, `apps/clone`, `apps/notify`) が共有する。clone は Snapshot API → DB、notify は DB → webhook。GitHub Actions の `needs` で clone → notify の順序を保証。
+**Architecture:** DB 層を `packages/datastore` に抽出し、3つのアプリ (`apps/web`, `apps/clone`, `apps/notify`) が共有する。clone は Snapshot API → DB、notify は DB → webhook。GitHub Actions の `needs` で clone → notify の順序を保証。
 
 **Tech Stack:** Turborepo, Drizzle ORM (PostgreSQL/Neon), GitHub Actions, tsx, Vitest
 
@@ -16,7 +16,7 @@
 
 | Path | Responsibility |
 |------|---------------|
-| `packages/db/` | 共有 DB schema + connection (apps/web から抽出) |
+| `packages/datastore/` | 共有 DB schema + connection (apps/web から抽出) |
 | `apps/clone/` | Snapshot API から動画データを取得して DB に保存 |
 | `apps/notify/` | DB の結果を評価して webhook を送信 |
 
@@ -42,46 +42,46 @@
 
 | Path | Reason |
 |------|--------|
-| `apps/web/src/shared/db/schema.ts` | `packages/db` に移動 |
-| `apps/web/src/shared/db/connection.ts` | `packages/db` に移動 |
-| `apps/web/src/shared/db/index.ts` | `packages/db` に移動。re-export は作らない |
-| `apps/web/drizzle.config.ts` | `packages/db` に移動 |
+| `apps/web/src/shared/db/schema.ts` | `packages/datastore` に移動 |
+| `apps/web/src/shared/db/connection.ts` | `packages/datastore` に移動 |
+| `apps/web/src/shared/db/index.ts` | `packages/datastore` に移動。re-export は作らない |
+| `apps/web/drizzle.config.ts` | `packages/datastore` に移動 |
 
 ### Modified Files
 
 | Path | Change |
 |------|--------|
-| `apps/web/package.json` | `@nicolens/db` dependency 追加、db:* scripts を packages/db に委譲 |
-| `apps/web/app/api/tagless/tagless-filters.ts` | `@/shared/db` → `@nicolens/db` |
-| `apps/web/app/api/tagless/route.ts` | `@/shared/db` → `@nicolens/db` |
-| `apps/web/app/api/tagless/crawl-db.ts` | `@/shared/db` → `@nicolens/db` |
-| `apps/web/app/api/tagless/route.test.ts` | `@/shared/db` → `@nicolens/db` |
-| `apps/web/app/api/semantic-search/route.ts` | `@/shared/db` → `@nicolens/db` |
-| `apps/web/app/api/embed/route.ts` | `@/shared/db` → `@nicolens/db` |
+| `apps/web/package.json` | `@nicolens/datastore` dependency 追加、db:* scripts を packages/datastore に委譲 |
+| `apps/web/app/api/tagless/tagless-filters.ts` | `@/shared/db` → `@nicolens/datastore` |
+| `apps/web/app/api/tagless/route.ts` | `@/shared/db` → `@nicolens/datastore` |
+| `apps/web/app/api/tagless/crawl-db.ts` | `@/shared/db` → `@nicolens/datastore` |
+| `apps/web/app/api/tagless/route.test.ts` | `@/shared/db` → `@nicolens/datastore` |
+| `apps/web/app/api/semantic-search/route.ts` | `@/shared/db` → `@nicolens/datastore` |
+| `apps/web/app/api/embed/route.ts` | `@/shared/db` → `@nicolens/datastore` |
 | `apps/web/src/pages/search/ui/search-page.tsx` | WatchButton 追加 |
 | `turbo.json` | clone, notify の task 追加 |
 
 ---
 
-### Task 1: Extract packages/db
+### Task 1: Extract packages/datastore
 
 **Files:**
-- Create: `packages/db/package.json`
-- Create: `packages/db/tsconfig.json`
-- Create: `packages/db/src/schema.ts` (moved from `apps/web/src/shared/db/schema.ts`)
-- Create: `packages/db/src/connection.ts` (moved from `apps/web/src/shared/db/connection.ts`)
-- Create: `packages/db/src/index.ts`
-- Create: `packages/db/drizzle.config.ts` (moved from `apps/web/drizzle.config.ts`)
+- Create: `packages/datastore/package.json`
+- Create: `packages/datastore/tsconfig.json`
+- Create: `packages/datastore/src/schema.ts` (moved from `apps/web/src/shared/db/schema.ts`)
+- Create: `packages/datastore/src/connection.ts` (moved from `apps/web/src/shared/db/connection.ts`)
+- Create: `packages/datastore/src/index.ts`
+- Create: `packages/datastore/drizzle.config.ts` (moved from `apps/web/drizzle.config.ts`)
 - Delete: `apps/web/src/shared/db/` (ディレクトリごと削除)
 - Delete: `apps/web/drizzle.config.ts`
-- Modify: `apps/web/package.json` — `@nicolens/db` dep 追加、db:* scripts 変更
-- Modify: 6 files — `@/shared/db` → `@nicolens/db` にインポート変更
+- Modify: `apps/web/package.json` — `@nicolens/datastore` dep 追加、db:* scripts 変更
+- Modify: 6 files — `@/shared/db` → `@nicolens/datastore` にインポート変更
 
-- [ ] **Step 1: Create packages/db/package.json**
+- [ ] **Step 1: Create packages/datastore/package.json**
 
 ```json
 {
-  "name": "@nicolens/db",
+  "name": "@nicolens/datastore",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -107,7 +107,7 @@
 }
 ```
 
-- [ ] **Step 2: Create packages/db/tsconfig.json**
+- [ ] **Step 2: Create packages/datastore/tsconfig.json**
 
 ```json
 {
@@ -120,15 +120,15 @@
 }
 ```
 
-- [ ] **Step 3: Move schema.ts to packages/db/src/schema.ts**
+- [ ] **Step 3: Move schema.ts to packages/datastore/src/schema.ts**
 
-Copy `apps/web/src/shared/db/schema.ts` to `packages/db/src/schema.ts`. Content is identical — this is a move, not a modification. Also add the new watch tables (see Task 2).
+Copy `apps/web/src/shared/db/schema.ts` to `packages/datastore/src/schema.ts`. Content is identical — this is a move, not a modification. Also add the new watch tables (see Task 2).
 
-- [ ] **Step 4: Move connection.ts to packages/db/src/connection.ts**
+- [ ] **Step 4: Move connection.ts to packages/datastore/src/connection.ts**
 
-Copy `apps/web/src/shared/db/connection.ts` to `packages/db/src/connection.ts`. Content is identical.
+Copy `apps/web/src/shared/db/connection.ts` to `packages/datastore/src/connection.ts`. Content is identical.
 
-- [ ] **Step 5: Create packages/db/src/index.ts**
+- [ ] **Step 5: Create packages/datastore/src/index.ts**
 
 ```typescript
 export { getDb } from "./connection";
@@ -143,7 +143,7 @@ export {
 
 - [ ] **Step 6: Move drizzle.config.ts**
 
-Copy `apps/web/drizzle.config.ts` to `packages/db/drizzle.config.ts`. Update the schema path:
+Copy `apps/web/drizzle.config.ts` to `packages/datastore/drizzle.config.ts`. Update the schema path:
 
 ```typescript
 import { defineConfig } from "drizzle-kit";
@@ -165,80 +165,80 @@ rm -rf apps/web/src/shared/db/
 rm apps/web/drizzle.config.ts
 ```
 
-- [ ] **Step 8: Add @nicolens/db to apps/web/package.json**
+- [ ] **Step 8: Add @nicolens/datastore to apps/web/package.json**
 
 Add to `dependencies`:
 ```json
-"@nicolens/db": "workspace:*"
+"@nicolens/datastore": "workspace:*"
 ```
 
-Update db scripts to delegate to packages/db:
+Update db scripts to delegate to packages/datastore:
 ```json
-"db:generate": "pnpm --filter @nicolens/db db:generate",
-"db:migrate": "pnpm --filter @nicolens/db db:migrate",
-"db:push": "pnpm --filter @nicolens/db db:push",
-"db:studio": "pnpm --filter @nicolens/db db:studio"
+"db:generate": "pnpm --filter @nicolens/datastore db:generate",
+"db:migrate": "pnpm --filter @nicolens/datastore db:migrate",
+"db:push": "pnpm --filter @nicolens/datastore db:push",
+"db:studio": "pnpm --filter @nicolens/datastore db:studio"
 ```
 
-Remove `drizzle-kit` from `apps/web/devDependencies` (now in `packages/db`).
+Remove `drizzle-kit` from `apps/web/devDependencies` (now in `packages/datastore`).
 
-- [ ] **Step 9: Update all imports from @/shared/db to @nicolens/db**
+- [ ] **Step 9: Update all imports from @/shared/db to @nicolens/datastore**
 
 6 files to update. In each file, replace the import:
 
 `apps/web/app/api/tagless/tagless-filters.ts`:
 ```typescript
 // before: import { taglessVideos } from "@/shared/db";
-import { taglessVideos } from "@nicolens/db";
+import { taglessVideos } from "@nicolens/datastore";
 ```
 
 `apps/web/app/api/tagless/route.ts`:
 ```typescript
 // before: import { getDb, taglessVideos } from "@/shared/db";
-import { getDb, taglessVideos } from "@nicolens/db";
+import { getDb, taglessVideos } from "@nicolens/datastore";
 ```
 
 `apps/web/app/api/tagless/crawl-db.ts`:
 ```typescript
 // before: import { getDb, taglessCrawlStatus, taglessVideos } from "@/shared/db";
-import { getDb, taglessCrawlStatus, taglessVideos } from "@nicolens/db";
+import { getDb, taglessCrawlStatus, taglessVideos } from "@nicolens/datastore";
 ```
 
 `apps/web/app/api/tagless/route.test.ts`:
 ```typescript
 // before: import { getDb } from "@/shared/db";
-import { getDb } from "@nicolens/db";
-// Also update vi.mock path: vi.mock("@nicolens/db", ...)
+import { getDb } from "@nicolens/datastore";
+// Also update vi.mock path: vi.mock("@nicolens/datastore", ...)
 ```
 
 `apps/web/app/api/semantic-search/route.ts`:
 ```typescript
 // before: import { getDb, videoEmbeddings } from "@/shared/db";
-import { getDb, videoEmbeddings } from "@nicolens/db";
+import { getDb, videoEmbeddings } from "@nicolens/datastore";
 ```
 
 `apps/web/app/api/embed/route.ts`:
 ```typescript
 // before: import { getDb, videoEmbeddings } from "@/shared/db";
-import { getDb, videoEmbeddings } from "@nicolens/db";
+import { getDb, videoEmbeddings } from "@nicolens/datastore";
 ```
 
 - [ ] **Step 10: Install and verify**
 
 Run: `pnpm install`
 Run: `pnpm typecheck`
-Expected: No errors. All imports resolve to `@nicolens/db`.
+Expected: No errors. All imports resolve to `@nicolens/datastore`.
 
 - [ ] **Step 11: Verify DB operations**
 
-Run: `pnpm --filter @nicolens/db db:push`
+Run: `pnpm --filter @nicolens/datastore db:push`
 Expected: No schema changes (tables already exist).
 
 - [ ] **Step 12: Commit**
 
 ```bash
-git add packages/db/ apps/web/ pnpm-lock.yaml
-git commit -m "refactor: extract database layer to packages/db, remove apps/web/src/shared/db"
+git add packages/datastore/ apps/web/ pnpm-lock.yaml
+git commit -m "refactor: extract database layer to packages/datastore, remove apps/web/src/shared/db"
 ```
 
 ---
@@ -246,12 +246,12 @@ git commit -m "refactor: extract database layer to packages/db, remove apps/web/
 ### Task 2: Add Watch Tables to Schema
 
 **Files:**
-- Modify: `packages/db/src/schema.ts`
-- Modify: `packages/db/src/index.ts`
+- Modify: `packages/datastore/src/schema.ts`
+- Modify: `packages/datastore/src/index.ts`
 
 - [ ] **Step 1: Add watch tables to schema**
 
-Add to `packages/db/src/schema.ts` imports:
+Add to `packages/datastore/src/schema.ts` imports:
 
 ```typescript
 import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
@@ -311,7 +311,7 @@ export const watchNotifications = pgTable(
 );
 ```
 
-- [ ] **Step 2: Update packages/db/src/index.ts**
+- [ ] **Step 2: Update packages/datastore/src/index.ts**
 
 ```typescript
 export { getDb } from "./connection";
@@ -327,13 +327,13 @@ export {
 
 - [ ] **Step 3: Push schema**
 
-Run: `pnpm --filter @nicolens/db db:push`
+Run: `pnpm --filter @nicolens/datastore db:push`
 Expected: 3 new tables created.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/db/src/schema.ts packages/db/src/index.ts
+git add packages/datastore/src/schema.ts packages/datastore/src/index.ts
 git commit -m "feat(db): add watch_conditions, watch_results, watch_notifications tables"
 ```
 
@@ -360,7 +360,7 @@ git commit -m "feat(db): add watch_conditions, watch_results, watch_notification
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@nicolens/db": "workspace:*",
+    "@nicolens/datastore": "workspace:*",
     "drizzle-orm": "^0.45.1"
   },
   "devDependencies": {
@@ -391,7 +391,7 @@ git commit -m "feat(db): add watch_conditions, watch_results, watch_notification
 ```typescript
 import { eq, lt } from "drizzle-orm";
 
-import { getDb, watchConditions, watchResults } from "@nicolens/db";
+import { getDb, watchConditions, watchResults } from "@nicolens/datastore";
 
 const SNAPSHOT_API = "https://snapshot.search.nicovideo.jp/api/v2/snapshot/video/contents/search";
 const SNAPSHOT_FIELDS =
@@ -597,7 +597,7 @@ git commit -m "feat: add apps/clone snapshot clone service"
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@nicolens/db": "workspace:*",
+    "@nicolens/datastore": "workspace:*",
     "drizzle-orm": "^0.45.1"
   },
   "devDependencies": {
@@ -874,7 +874,7 @@ export const sendWebhook = async (params: SendWebhookParams): Promise<SendWebhoo
 ```typescript
 import { and, eq, lt, notInArray } from "drizzle-orm";
 
-import { getDb, watchConditions, watchNotifications, watchResults } from "@nicolens/db";
+import { getDb, watchConditions, watchNotifications, watchResults } from "@nicolens/datastore";
 
 import { sendWebhook } from "./webhook-sender";
 
@@ -1046,7 +1046,7 @@ git commit -m "feat: add apps/notify webhook notification service"
 ```typescript
 import { type NextRequest, NextResponse } from "next/server";
 
-import { getDb, watchConditions } from "@nicolens/db";
+import { getDb, watchConditions } from "@nicolens/datastore";
 
 const HTTP_BAD_REQUEST = 400;
 const BLOCKED_HOSTNAMES = new Set(["localhost", "0.0.0.0", "[::1]"]);
@@ -1122,7 +1122,7 @@ export const POST = async (request: NextRequest) => {
 import { type NextRequest, NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 
-import { getDb, watchConditions, watchNotifications } from "@nicolens/db";
+import { getDb, watchConditions, watchNotifications } from "@nicolens/datastore";
 
 const HTTP_NOT_FOUND = 404;
 const HTTP_BAD_REQUEST = 400;
