@@ -213,6 +213,46 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@20.19.37)(jiti@2.6.1)(jsdom@28.1.0(@noble/hashes@1.8.0))(lightningcss@1.31.1)(msw@2.12.10(@types/node@20.19.37)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.2)
 
+  apps/webhook-dispatcher:
+    dependencies:
+      '@nicolens/datastore':
+        specifier: workspace:*
+        version: link:../../packages/datastore
+      drizzle-orm:
+        specifier: ^0.45.1
+        version: 0.45.1(@neondatabase/serverless@1.0.2)(@types/pg@8.18.0)(postgres@3.4.8)
+    devDependencies:
+      '@nicolens/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
+      '@types/node':
+        specifier: ^20
+        version: 20.19.37
+      '@typescript/native-preview':
+        specifier: 7.0.0-dev.20260307.1
+        version: 7.0.0-dev.20260307.1
+      knip:
+        specifier: ^5.86.0
+        version: 5.86.0(@types/node@20.19.37)(typescript@5.9.3)
+      oxfmt:
+        specifier: ^0.36.0
+        version: 0.36.0
+      oxlint:
+        specifier: ^1.51.0
+        version: 1.51.0(oxlint-tsgolint@0.16.0)
+      oxlint-tsgolint:
+        specifier: ^0.16.0
+        version: 0.16.0
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@types/node@20.19.37)(jiti@2.6.1)(jsdom@28.1.0(@noble/hashes@1.8.0))(lightningcss@1.31.1)(msw@2.12.10(@types/node@20.19.37)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.2)
+
   packages/datastore:
     dependencies:
       drizzle-orm:
