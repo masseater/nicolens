@@ -1,4 +1,4 @@
-import { eq, lt } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 
 import { getDb, notificationLog, pendingNotifications, webhooks } from "@nicolens/datastore";
 
@@ -89,6 +89,20 @@ const recordLog = async (
     .onConflictDoNothing();
 };
 
+const isAlreadyLogged = async (db: Db, pending: PendingRow): Promise<boolean> => {
+  const rows = await db
+    .select({ id: notificationLog.id })
+    .from(notificationLog)
+    .where(
+      and(
+        eq(notificationLog.triggerId, pending.triggerId),
+        eq(notificationLog.contentId, pending.contentId),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+};
+
 const dispatchPending = async (
   ctx: DispatchContext,
   pending: PendingRow,
@@ -100,13 +114,15 @@ const dispatchPending = async (
     payloadStr: pending.payload,
   });
   await recordLog(ctx, pending, sendResult.success);
-  await deletePending(ctx.db, pending.id);
   if (sendResult.success) {
+    await deletePending(ctx.db, pending.id);
     ctx.result.delivered++;
     console.log(`[webhook-dispatcher] delivered ${pending.contentId} via webhook ${webhook.id}`);
   } else {
     ctx.result.failed++;
-    console.warn(`[webhook-dispatcher] failed ${pending.contentId} via webhook ${webhook.id}`);
+    console.warn(
+      `[webhook-dispatcher] failed ${pending.contentId} via webhook ${webhook.id}; pending row retained for retry`,
+    );
   }
 };
 
@@ -131,11 +147,23 @@ const tryDispatch = async (
   }
 };
 
+const skipDuplicate = async (ctx: DispatchContext, pending: PendingRow): Promise<void> => {
+  await deletePending(ctx.db, pending.id);
+  ctx.result.skipped++;
+  console.log(
+    `[webhook-dispatcher] skipped ${pending.contentId} (already logged for trigger ${pending.triggerId})`,
+  );
+};
+
 const handlePending = async (ctx: DispatchContext, pending: PendingRow): Promise<void> => {
   ctx.result.pendingProcessed++;
   const webhook = await fetchWebhook(ctx.db, pending.webhookId);
   if (webhook === undefined || !webhook.isActive) {
     await skipPending(ctx, pending);
+    return;
+  }
+  if (await isAlreadyLogged(ctx.db, pending)) {
+    await skipDuplicate(ctx, pending);
     return;
   }
   await tryDispatch(ctx, pending, webhook);
