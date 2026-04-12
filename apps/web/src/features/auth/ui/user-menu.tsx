@@ -46,16 +46,16 @@ export const UserMenu = async () => {
         <DropdownMenuItem render={<Link href="/webhooks">Webhooks</Link>} />
         <DropdownMenuItem render={<Link href="/watches">Tag Watches</Link>} />
         <DropdownMenuSeparator />
-        <DropdownMenuItem
-          render={
-            <form action={handleSignOut}>
+        <form action={handleSignOut}>
+          <DropdownMenuItem
+            render={
               <button type="submit" className="flex w-full items-center gap-1.5">
                 <LogOut className="size-4" />
                 ログアウト
               </button>
-            </form>
-          }
-        />
+            }
+          />
+        </form>
       </DropdownMenuContent>
     </DropdownMenu>
   );
