@@ -1,0 +1,54 @@
+name: Tag Watch Pipeline
+
+on:
+  schedule:
+    - cron: "10 20 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Snapshot Sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nicolens/snapshot-syncer start
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+  scan:
+    name: Tag Scan
+    needs: sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nicolens/tag-scanner start
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+  dispatch:
+    name: Webhook Dispatch
+    needs: scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nicolens/webhook-dispatcher start
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}

@@ -10,6 +10,10 @@
       "env": ["DATABASE_URL", "GEMINI_API_KEY", "AUTH_SECRET", "AUTH_GITHUB_ID", "AUTH_GITHUB_SECRET"],
       "outputs": [".next/**", "!.next/cache/**"]
     },
+    "start": {
+      "cache": false,
+      "env": ["DATABASE_URL"]
+    },
     "lint": {},
     "fmt": {},
     "fmt:check": {},
