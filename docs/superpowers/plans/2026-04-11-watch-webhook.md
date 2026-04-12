@@ -4,7 +4,7 @@
 
 **Goal:** Snapshot API の日次更新を監視し、ユーザー定義の検索条件に合致する新着動画を webhook で通知する。clone と notify を独立したマイクロサービスとしてモノレポ内に構成し、GitHub Actions で実行する。
 
-**Architecture:** DB 層を `packages/datastore` に抽出し、3つのアプリ (`apps/web`, `apps/clone`, `apps/notify`) が共有する。clone は Snapshot API → DB、notify は DB → webhook。GitHub Actions の `needs` で clone → notify の順序を保証。
+**Architecture:** DB 層を `packages/datastore` に抽出し、3つのアプリ (`apps/web`, `apps/tag-scanner`, `apps/webhook-dispatcher`) が共有する。clone は Snapshot API → DB、notify は DB → webhook。GitHub Actions の `needs` で clone → notify の順序を保証。
 
 **Tech Stack:** Turborepo, Drizzle ORM (PostgreSQL/Neon), GitHub Actions, tsx, Vitest
 
@@ -17,8 +17,8 @@
 | Path | Responsibility |
 |------|---------------|
 | `packages/datastore/` | 共有 DB schema + connection (apps/web から抽出) |
-| `apps/clone/` | Snapshot API から動画データを取得して DB に保存 |
-| `apps/notify/` | DB の結果を評価して webhook を送信 |
+| `apps/tag-scanner/` | Snapshot API から動画データを取得して DB に保存 |
+| `apps/webhook-dispatcher/` | DB の結果を評価して webhook を送信 |
 
 ### New Files in apps/web
 
@@ -339,19 +339,19 @@ git commit -m "feat(db): add watch_conditions, watch_results, watch_notification
 
 ---
 
-### Task 3: Create apps/clone
+### Task 3: Create apps/tag-scanner
 
 **Files:**
-- Create: `apps/clone/package.json`
-- Create: `apps/clone/tsconfig.json`
-- Create: `apps/clone/src/clone-handler.ts`
-- Create: `apps/clone/src/index.ts`
+- Create: `apps/tag-scanner/package.json`
+- Create: `apps/tag-scanner/tsconfig.json`
+- Create: `apps/tag-scanner/src/clone-handler.ts`
+- Create: `apps/tag-scanner/src/index.ts`
 
-- [ ] **Step 1: Create apps/clone/package.json**
+- [ ] **Step 1: Create apps/tag-scanner/package.json**
 
 ```json
 {
-  "name": "@nicolens/clone",
+  "name": "@nicolens/tag-scanner",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -371,7 +371,7 @@ git commit -m "feat(db): add watch_conditions, watch_results, watch_notification
 }
 ```
 
-- [ ] **Step 2: Create apps/clone/tsconfig.json**
+- [ ] **Step 2: Create apps/tag-scanner/tsconfig.json**
 
 ```json
 {
@@ -386,7 +386,7 @@ git commit -m "feat(db): add watch_conditions, watch_results, watch_notification
 
 - [ ] **Step 3: Implement clone-handler.ts**
 
-`apps/clone/src/clone-handler.ts`:
+`apps/tag-scanner/src/clone-handler.ts`:
 
 ```typescript
 import { eq, lt } from "drizzle-orm";
@@ -536,7 +536,7 @@ export const runClone = async (): Promise<CloneResult> => {
 
 - [ ] **Step 4: Implement index.ts entry point**
 
-`apps/clone/src/index.ts`:
+`apps/tag-scanner/src/index.ts`:
 
 ```typescript
 import { runClone } from "./clone-handler";
@@ -557,36 +557,36 @@ void main();
 - [ ] **Step 5: Install and verify**
 
 Run: `pnpm install`
-Run: `pnpm --filter @nicolens/clone typecheck`
+Run: `pnpm --filter @nicolens/tag-scanner typecheck`
 Expected: No errors.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/clone/
-git commit -m "feat: add apps/clone snapshot clone service"
+git add apps/tag-scanner/
+git commit -m "feat: add apps/tag-scanner snapshot clone service"
 ```
 
 ---
 
-### Task 4: Create apps/notify
+### Task 4: Create apps/webhook-dispatcher
 
 **Files:**
-- Create: `apps/notify/package.json`
-- Create: `apps/notify/tsconfig.json`
-- Create: `apps/notify/src/url-validator.ts`
-- Create: `apps/notify/src/url-validator.test.ts`
-- Create: `apps/notify/src/webhook-formats.ts`
-- Create: `apps/notify/src/webhook-formats.test.ts`
-- Create: `apps/notify/src/webhook-sender.ts`
-- Create: `apps/notify/src/notify-handler.ts`
-- Create: `apps/notify/src/index.ts`
+- Create: `apps/webhook-dispatcher/package.json`
+- Create: `apps/webhook-dispatcher/tsconfig.json`
+- Create: `apps/webhook-dispatcher/src/url-validator.ts`
+- Create: `apps/webhook-dispatcher/src/url-validator.test.ts`
+- Create: `apps/webhook-dispatcher/src/webhook-formats.ts`
+- Create: `apps/webhook-dispatcher/src/webhook-formats.test.ts`
+- Create: `apps/webhook-dispatcher/src/webhook-sender.ts`
+- Create: `apps/webhook-dispatcher/src/notify-handler.ts`
+- Create: `apps/webhook-dispatcher/src/index.ts`
 
-- [ ] **Step 1: Create apps/notify/package.json**
+- [ ] **Step 1: Create apps/webhook-dispatcher/package.json**
 
 ```json
 {
-  "name": "@nicolens/notify",
+  "name": "@nicolens/webhook-dispatcher",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -609,7 +609,7 @@ git commit -m "feat: add apps/clone snapshot clone service"
 }
 ```
 
-- [ ] **Step 2: Create apps/notify/tsconfig.json**
+- [ ] **Step 2: Create apps/webhook-dispatcher/tsconfig.json**
 
 ```json
 {
@@ -624,7 +624,7 @@ git commit -m "feat: add apps/clone snapshot clone service"
 
 - [ ] **Step 3: Implement url-validator.ts with tests**
 
-`apps/notify/src/url-validator.ts`:
+`apps/webhook-dispatcher/src/url-validator.ts`:
 
 ```typescript
 const BLOCKED_HOSTNAMES = new Set(["localhost", "0.0.0.0", "[::1]"]);
@@ -662,7 +662,7 @@ export const validateWebhookUrl = (url: string): boolean => {
 };
 ```
 
-`apps/notify/src/url-validator.test.ts`:
+`apps/webhook-dispatcher/src/url-validator.test.ts`:
 
 ```typescript
 import { describe, expect, it } from "vitest";
@@ -697,7 +697,7 @@ describe("validateWebhookUrl", () => {
 
 - [ ] **Step 4: Implement webhook-formats.ts with tests**
 
-`apps/notify/src/webhook-formats.ts`:
+`apps/webhook-dispatcher/src/webhook-formats.ts`:
 
 ```typescript
 interface VideoContent {
@@ -773,7 +773,7 @@ export const buildDiscordPayload = (
 });
 ```
 
-`apps/notify/src/webhook-formats.test.ts`:
+`apps/webhook-dispatcher/src/webhook-formats.test.ts`:
 
 ```typescript
 import { describe, expect, it } from "vitest";
@@ -820,7 +820,7 @@ describe("buildDiscordPayload", () => {
 
 - [ ] **Step 5: Implement webhook-sender.ts**
 
-`apps/notify/src/webhook-sender.ts`:
+`apps/webhook-dispatcher/src/webhook-sender.ts`:
 
 ```typescript
 import { buildDiscordPayload, buildGenericPayload } from "./webhook-formats";
@@ -869,7 +869,7 @@ export const sendWebhook = async (params: SendWebhookParams): Promise<SendWebhoo
 
 - [ ] **Step 6: Implement notify-handler.ts**
 
-`apps/notify/src/notify-handler.ts`:
+`apps/webhook-dispatcher/src/notify-handler.ts`:
 
 ```typescript
 import { and, eq, lt, notInArray } from "drizzle-orm";
@@ -998,7 +998,7 @@ export const runNotify = async (): Promise<NotifyResult> => {
 
 - [ ] **Step 7: Implement index.ts entry point**
 
-`apps/notify/src/index.ts`:
+`apps/webhook-dispatcher/src/index.ts`:
 
 ```typescript
 import { runNotify } from "./notify-handler";
@@ -1019,16 +1019,16 @@ void main();
 - [ ] **Step 8: Install, test, verify**
 
 Run: `pnpm install`
-Run: `pnpm --filter @nicolens/notify test`
+Run: `pnpm --filter @nicolens/webhook-dispatcher test`
 Expected: All tests pass.
-Run: `pnpm --filter @nicolens/notify typecheck`
+Run: `pnpm --filter @nicolens/webhook-dispatcher typecheck`
 Expected: No errors.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add apps/notify/
-git commit -m "feat: add apps/notify webhook notification service"
+git add apps/webhook-dispatcher/
+git commit -m "feat: add apps/webhook-dispatcher webhook notification service"
 ```
 
 ---
@@ -1454,7 +1454,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @nicolens/clone start
+      - run: pnpm --filter @nicolens/tag-scanner start
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
@@ -1469,7 +1469,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @nicolens/notify start
+      - run: pnpm --filter @nicolens/webhook-dispatcher start
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 ```
@@ -1511,8 +1511,8 @@ Fix any lint, format, typecheck, or knip issues.
 
 1. Start dev server: `pnpm dev`
 2. Search for a keyword, click bell icon, enter webhook URL, save
-3. Run clone manually: `pnpm --filter @nicolens/clone start`
-4. Run notify manually: `pnpm --filter @nicolens/notify start`
+3. Run clone manually: `pnpm --filter @nicolens/tag-scanner start`
+4. Run notify manually: `pnpm --filter @nicolens/webhook-dispatcher start`
 5. Verify webhook received at test endpoint
 
 - [ ] **Step 3: Commit any fixes**

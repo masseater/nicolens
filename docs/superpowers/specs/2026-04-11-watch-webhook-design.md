@@ -13,8 +13,8 @@
 nicolens/
   apps/
     web/       — Next.js app (認証 + Webhook CRUD + Tag Trigger CRUD)
-    clone/     — タグ更新検知 (Snapshot API → watch_results)
-    notify/    — Webhook 送信 (pending_notifications → webhook endpoints)
+    tag-scanner/     — タグ更新検知 (Snapshot API → watch_results)
+    webhook-dispatcher/    — Webhook 送信 (pending_notifications → webhook endpoints)
   packages/
     tsconfig/  — 共有 TypeScript config (既存)
     datastore/ — 共有 DB schema + connection
@@ -25,10 +25,10 @@ nicolens/
 | App | 知っていること | 知らないこと |
 |-----|-------------|------------|
 | web | ユーザー、Webhook、Tag Trigger | Snapshot API の叩き方、通知の送り方 |
-| clone | タグ、Snapshot API、watch_results | Webhook の存在、通知の送り方 |
-| notify | pending_notifications、Webhook URL | タグ、Snapshot API |
+| tag-scanner | タグ、Snapshot API、watch_results | Webhook の存在、通知の送り方 |
+| webhook-dispatcher | pending_notifications、Webhook URL | タグ、Snapshot API |
 
-clone は「何が新しいか」を発見し、pending_notifications に書く。notify は「どこに送るか」を処理する。互いを知らない。
+tag-scanner は「何が新しいか」を発見し、pending_notifications に書く。webhook-dispatcher は「どこに送るか」を処理する。互いを知らない。
 
 ## 認証
 
@@ -82,7 +82,7 @@ INDEX: (user_id)
 INDEX: (user_id)
 UNIQUE: (user_id, tag, webhook_id)
 
-### watch_results テーブル (clone が書き込み)
+### watch_results テーブル (tag-scanner が書き込み)
 
 | カラム | 型 | 説明 |
 |--------|-----|------|
@@ -94,9 +94,9 @@ UNIQUE: (user_id, tag, webhook_id)
 PK: (tag, content_id)
 INDEX: (discovered_at) — クリーンアップ用
 
-### pending_notifications テーブル (clone が書き込み、notify が処理)
+### pending_notifications テーブル (tag-scanner が書き込み、webhook-dispatcher が処理)
 
-clone と notify の間の**キュー**。clone がトリガー条件を評価して通知対象を決定し、pending に書く。notify はそれを読んで送信する。
+tag-scanner と webhook-dispatcher の間の**キュー**。tag-scanner がトリガー条件を評価して通知対象を決定し、pending に書く。webhook-dispatcher はそれを読んで送信する。
 
 | カラム | 型 | 説明 |
 |--------|-----|------|
@@ -107,7 +107,7 @@ clone と notify の間の**キュー**。clone がトリガー条件を評価�
 
 INDEX: (created_at)
 
-### notification_log テーブル (notify が書き込み)
+### notification_log テーブル (webhook-dispatcher が書き込み)
 
 | カラム | 型 | 説明 |
 |--------|-----|------|
@@ -132,12 +132,12 @@ flowchart TB
         TriggerCRUD[Tag Trigger CRUD]
     end
 
-    subgraph Clone["apps/clone (GitHub Actions)"]
+    subgraph Clone["apps/tag-scanner (GitHub Actions)"]
         DetectTags[Detect tag updates]
         WritePending[Write pending notifications]
     end
 
-    subgraph Notify["apps/notify (GitHub Actions)"]
+    subgraph Notify["apps/webhook-dispatcher (GitHub Actions)"]
         ReadPending[Read pending notifications]
         SendWebhook[Send to webhook endpoints]
         RecordLog[Record to notification log]
@@ -196,7 +196,7 @@ flowchart TB
 3. 90日以上前の notification_log を削除
 ```
 
-notify は Webhook の url と format と payload しか知らない。タグの存在すら知らない。
+webhook-dispatcher は Webhook の url と format と payload しか知らない。タグの存在すら知らない。
 
 ## API エンドポイント (apps/web)
 
