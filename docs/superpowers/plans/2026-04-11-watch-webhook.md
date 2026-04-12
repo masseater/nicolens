@@ -1,42 +1,64 @@
-# Watch & Webhook Implementation Plan (v2 — Microservices)
+# Tag Watch & Webhook Implementation Plan (v3)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Snapshot API の日次更新を監視し、ユーザー定義の検索条件に合致する新着動画を webhook で通知する。clone と notify を独立したマイクロサービスとしてモノレポ内に構成し、GitHub Actions で実行する。
+**Goal:** GitHub OAuth 認証を導入し、ユーザーが Webhook と Tag Trigger を独立に管理できるようにする。バックエンドは 3 つの独立サービス (snapshot-syncer, tag-scanner, webhook-dispatcher) を GitHub Actions パイプラインで順次実行する。
 
-**Architecture:** DB 層を `packages/datastore` に抽出し、3つのアプリ (`apps/web`, `apps/tag-scanner`, `apps/webhook-dispatcher`) が共有する。clone は Snapshot API → DB、notify は DB → webhook。GitHub Actions の `needs` で clone → notify の順序を保証。
+**Architecture:** 4 apps + 1 shared datastore package。`snapshot-syncer (API→DB) → tag-scanner (DB→DB) → webhook-dispatcher (DB→HTTP)` の3段パイプライン。各サービスの外部依存は片方向に最大1つ。
 
-**Tech Stack:** Turborepo, Drizzle ORM (PostgreSQL/Neon), GitHub Actions, tsx, Vitest
+**Tech Stack:** Turborepo, Next.js 16, Auth.js v5, Drizzle ORM (Neon PostgreSQL), tsx, Vitest, GitHub Actions
 
 ---
 
 ## File Map
 
-### New Packages/Apps
+### New Packages
 
 | Path | Responsibility |
 |------|---------------|
-| `packages/datastore/` | 共有 DB schema + connection (apps/web から抽出) |
-| `apps/tag-scanner/` | Snapshot API から動画データを取得して DB に保存 |
-| `apps/webhook-dispatcher/` | DB の結果を評価して webhook を送信 |
+| `packages/datastore/` | 共有 DB schema (Auth.js + watch 関連すべて) + connection |
+| `packages/nicovideo-snapshot-api/` | Snapshot API クライアント (fetch, 型, クエリビルダ) |
+
+### New Apps
+
+| Path | Responsibility |
+|------|---------------|
+| `apps/snapshot-syncer/` | Snapshot API → `watch_results` |
+| `apps/tag-scanner/` | `watch_results` → `pending_notifications` |
+| `apps/webhook-dispatcher/` | `pending_notifications` → Webhook endpoints |
 
 ### New Files in apps/web
 
 | Path | Responsibility |
 |------|---------------|
-| `apps/web/app/api/watch/route.ts` | POST: 条件作成 |
-| `apps/web/app/api/watch/[token]/route.ts` | GET/PATCH/DELETE: 条件管理 |
-| `apps/web/app/watch/[token]/page.tsx` | 管理ページ |
-| `apps/web/src/features/watch/ui/watch-button.tsx` | Watch ボタン |
-| `apps/web/src/features/watch/index.ts` | barrel |
-| `apps/web/src/pages/watch/ui/watch-page.tsx` | ページ構成 |
-| `apps/web/src/pages/watch/index.ts` | barrel |
+| `src/auth.ts` | Auth.js 設定 (providers, adapter) |
+| `src/middleware.ts` | 保護ルーティング |
+| `app/api/auth/[...nextauth]/route.ts` | Auth.js route handler |
+| `app/api/webhooks/route.ts` | GET, POST |
+| `app/api/webhooks/[id]/route.ts` | PATCH, DELETE |
+| `app/api/watches/route.ts` | GET, POST |
+| `app/api/watches/[id]/route.ts` | PATCH, DELETE |
+| `app/webhooks/page.tsx` | /webhooks ページ |
+| `app/watches/page.tsx` | /watches ページ |
+| `src/features/auth/ui/auth-button.tsx` | ログイン/ログアウト |
+| `src/features/auth/ui/user-menu.tsx` | ユーザーメニュー |
+| `src/features/auth/index.ts` | barrel |
+| `src/features/webhook/ui/webhook-list.tsx` | 一覧 |
+| `src/features/webhook/ui/webhook-form.tsx` | 追加フォーム |
+| `src/features/webhook/index.ts` | barrel |
+| `src/features/tag-watch/ui/tag-watch-list.tsx` | 一覧 |
+| `src/features/tag-watch/ui/tag-watch-form.tsx` | 追加フォーム |
+| `src/features/tag-watch/index.ts` | barrel |
+| `src/pages/webhooks/ui/webhooks-page.tsx` | ページ構成 |
+| `src/pages/webhooks/index.ts` | barrel |
+| `src/pages/watches/ui/watches-page.tsx` | ページ構成 |
+| `src/pages/watches/index.ts` | barrel |
 
 ### New Workflow
 
 | Path | Responsibility |
 |------|---------------|
-| `.github/workflows/watch.yml` | Daily cron: clone → notify |
+| `.github/workflows/tag-watch.yml` | Daily: sync → scan → dispatch |
 
 ### Deleted Files
 
@@ -44,38 +66,40 @@
 |------|--------|
 | `apps/web/src/shared/db/schema.ts` | `packages/datastore` に移動 |
 | `apps/web/src/shared/db/connection.ts` | `packages/datastore` に移動 |
-| `apps/web/src/shared/db/index.ts` | `packages/datastore` に移動。re-export は作らない |
+| `apps/web/src/shared/db/index.ts` | 不要 (re-export しない) |
 | `apps/web/drizzle.config.ts` | `packages/datastore` に移動 |
 
 ### Modified Files
 
 | Path | Change |
 |------|--------|
-| `apps/web/package.json` | `@nicolens/datastore` dependency 追加、db:* scripts を packages/datastore に委譲 |
+| `apps/web/package.json` | `@nicolens/datastore` + auth 系依存追加、db:* scripts 削除 |
 | `apps/web/app/api/tagless/tagless-filters.ts` | `@/shared/db` → `@nicolens/datastore` |
-| `apps/web/app/api/tagless/route.ts` | `@/shared/db` → `@nicolens/datastore` |
-| `apps/web/app/api/tagless/crawl-db.ts` | `@/shared/db` → `@nicolens/datastore` |
-| `apps/web/app/api/tagless/route.test.ts` | `@/shared/db` → `@nicolens/datastore` |
-| `apps/web/app/api/semantic-search/route.ts` | `@/shared/db` → `@nicolens/datastore` |
-| `apps/web/app/api/embed/route.ts` | `@/shared/db` → `@nicolens/datastore` |
-| `apps/web/src/pages/search/ui/search-page.tsx` | WatchButton 追加 |
-| `turbo.json` | clone, notify の task 追加 |
+| `apps/web/app/api/tagless/route.ts` | 同上 |
+| `apps/web/app/api/tagless/crawl-db.ts` | 同上 |
+| `apps/web/app/api/tagless/route.test.ts` | 同上 (vi.mock も) |
+| `apps/web/app/api/semantic-search/route.ts` | 同上 |
+| `apps/web/app/api/embed/route.ts` | 同上 |
+| `apps/web/src/widgets/app-header/` | UserMenu / AuthButton 追加 |
+| `turbo.json` | start task 追加 |
 
 ---
 
 ### Task 1: Extract packages/datastore
 
+既存の DB 層を `packages/datastore` に抽出し、`apps/web/src/shared/db/` を完全削除する。re-export shim は作らない。
+
 **Files:**
 - Create: `packages/datastore/package.json`
 - Create: `packages/datastore/tsconfig.json`
-- Create: `packages/datastore/src/schema.ts` (moved from `apps/web/src/shared/db/schema.ts`)
-- Create: `packages/datastore/src/connection.ts` (moved from `apps/web/src/shared/db/connection.ts`)
+- Create: `packages/datastore/src/schema.ts` (moved)
+- Create: `packages/datastore/src/connection.ts` (moved)
 - Create: `packages/datastore/src/index.ts`
-- Create: `packages/datastore/drizzle.config.ts` (moved from `apps/web/drizzle.config.ts`)
-- Delete: `apps/web/src/shared/db/` (ディレクトリごと削除)
+- Create: `packages/datastore/drizzle.config.ts`
+- Delete: `apps/web/src/shared/db/`
 - Delete: `apps/web/drizzle.config.ts`
-- Modify: `apps/web/package.json` — `@nicolens/datastore` dep 追加、db:* scripts 変更
-- Modify: 6 files — `@/shared/db` → `@nicolens/datastore` にインポート変更
+- Modify: `apps/web/package.json`
+- Modify: 6 existing files with `@/shared/db` imports
 
 - [ ] **Step 1: Create packages/datastore/package.json**
 
@@ -93,7 +117,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.1",
@@ -101,6 +125,7 @@
   },
   "devDependencies": {
     "@nicolens/tsconfig": "workspace:*",
+    "@typescript/native-preview": "7.0.0-dev.20260307.1",
     "drizzle-kit": "^0.31.9",
     "typescript": "^5"
   }
@@ -120,15 +145,16 @@
 }
 ```
 
-- [ ] **Step 3: Move schema.ts to packages/datastore/src/schema.ts**
+- [ ] **Step 3: Move schema.ts and connection.ts**
 
-Copy `apps/web/src/shared/db/schema.ts` to `packages/datastore/src/schema.ts`. Content is identical — this is a move, not a modification. Also add the new watch tables (see Task 2).
+```bash
+mv apps/web/src/shared/db/schema.ts packages/datastore/src/schema.ts
+mv apps/web/src/shared/db/connection.ts packages/datastore/src/connection.ts
+```
 
-- [ ] **Step 4: Move connection.ts to packages/datastore/src/connection.ts**
+Content remains identical at this step. New tables are added in Task 2.
 
-Copy `apps/web/src/shared/db/connection.ts` to `packages/datastore/src/connection.ts`. Content is identical.
-
-- [ ] **Step 5: Create packages/datastore/src/index.ts**
+- [ ] **Step 4: Create packages/datastore/src/index.ts**
 
 ```typescript
 export { getDb } from "./connection";
@@ -139,11 +165,13 @@ export {
 } from "./schema";
 ```
 
-(watch tables will be added in Task 2)
+- [ ] **Step 5: Move drizzle.config.ts**
 
-- [ ] **Step 6: Move drizzle.config.ts**
+```bash
+mv apps/web/drizzle.config.ts packages/datastore/drizzle.config.ts
+```
 
-Copy `apps/web/drizzle.config.ts` to `packages/datastore/drizzle.config.ts`. Update the schema path:
+Edit `packages/datastore/drizzle.config.ts` to use the new schema path:
 
 ```typescript
 import { defineConfig } from "drizzle-kit";
@@ -153,225 +181,1731 @@ export default defineConfig({
   schema: "./src/schema.ts",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env["DATABASE_URL"]!,
+    url: process.env["DATABASE_URL"] ?? "",
   },
 });
 ```
 
-- [ ] **Step 7: Delete apps/web/src/shared/db/ entirely**
+- [ ] **Step 6: Delete apps/web/src/shared/db/ directory**
 
 ```bash
 rm -rf apps/web/src/shared/db/
-rm apps/web/drizzle.config.ts
 ```
 
-- [ ] **Step 8: Add @nicolens/datastore to apps/web/package.json**
+- [ ] **Step 7: Update apps/web/package.json**
 
 Add to `dependencies`:
 ```json
 "@nicolens/datastore": "workspace:*"
 ```
 
-Update db scripts to delegate to packages/datastore:
+Remove from `devDependencies`:
 ```json
-"db:generate": "pnpm --filter @nicolens/datastore db:generate",
-"db:migrate": "pnpm --filter @nicolens/datastore db:migrate",
-"db:push": "pnpm --filter @nicolens/datastore db:push",
-"db:studio": "pnpm --filter @nicolens/datastore db:studio"
+"drizzle-kit": "^0.31.9"
 ```
 
-Remove `drizzle-kit` from `apps/web/devDependencies` (now in `packages/datastore`).
-
-- [ ] **Step 9: Update all imports from @/shared/db to @nicolens/datastore**
-
-6 files to update. In each file, replace the import:
-
-`apps/web/app/api/tagless/tagless-filters.ts`:
-```typescript
-// before: import { taglessVideos } from "@/shared/db";
-import { taglessVideos } from "@nicolens/datastore";
+Remove from `scripts` (now delegated to packages/datastore):
+```json
+"db:generate": ...
+"db:migrate": ...
+"db:push": ...
+"db:studio": ...
 ```
 
-`apps/web/app/api/tagless/route.ts`:
-```typescript
-// before: import { getDb, taglessVideos } from "@/shared/db";
-import { getDb, taglessVideos } from "@nicolens/datastore";
+- [ ] **Step 8: Update 6 files' imports**
+
+In each file below, replace `from "@/shared/db"` with `from "@nicolens/datastore"`:
+
+1. `apps/web/app/api/tagless/tagless-filters.ts`
+2. `apps/web/app/api/tagless/route.ts`
+3. `apps/web/app/api/tagless/crawl-db.ts`
+4. `apps/web/app/api/tagless/route.test.ts` — **also** update `vi.mock("@/shared/db", ...)` to `vi.mock("@nicolens/datastore", ...)`
+5. `apps/web/app/api/semantic-search/route.ts`
+6. `apps/web/app/api/embed/route.ts`
+
+- [ ] **Step 9: Install & verify**
+
+```bash
+pnpm install
+pnpm typecheck
+pnpm --filter @nicolens/datastore db:push
 ```
 
-`apps/web/app/api/tagless/crawl-db.ts`:
-```typescript
-// before: import { getDb, taglessCrawlStatus, taglessVideos } from "@/shared/db";
-import { getDb, taglessCrawlStatus, taglessVideos } from "@nicolens/datastore";
-```
+Expected: No typecheck errors. Schema push reports no changes (existing tables unchanged).
 
-`apps/web/app/api/tagless/route.test.ts`:
-```typescript
-// before: import { getDb } from "@/shared/db";
-import { getDb } from "@nicolens/datastore";
-// Also update vi.mock path: vi.mock("@nicolens/datastore", ...)
-```
-
-`apps/web/app/api/semantic-search/route.ts`:
-```typescript
-// before: import { getDb, videoEmbeddings } from "@/shared/db";
-import { getDb, videoEmbeddings } from "@nicolens/datastore";
-```
-
-`apps/web/app/api/embed/route.ts`:
-```typescript
-// before: import { getDb, videoEmbeddings } from "@/shared/db";
-import { getDb, videoEmbeddings } from "@nicolens/datastore";
-```
-
-- [ ] **Step 10: Install and verify**
-
-Run: `pnpm install`
-Run: `pnpm typecheck`
-Expected: No errors. All imports resolve to `@nicolens/datastore`.
-
-- [ ] **Step 11: Verify DB operations**
-
-Run: `pnpm --filter @nicolens/datastore db:push`
-Expected: No schema changes (tables already exist).
-
-- [ ] **Step 12: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add packages/datastore/ apps/web/ pnpm-lock.yaml
-git commit -m "refactor: extract database layer to packages/datastore, remove apps/web/src/shared/db"
+git commit -m "refactor: extract database layer to packages/datastore"
 ```
 
 ---
 
-### Task 2: Add Watch Tables to Schema
+### Task 2: Add Auth.js + Watch Tables to Schema
+
+Drizzle adapter の標準テーブル (users, accounts, sessions, verificationTokens) と watch 関連テーブルをスキーマに追加する。
 
 **Files:**
 - Modify: `packages/datastore/src/schema.ts`
 - Modify: `packages/datastore/src/index.ts`
 
-- [ ] **Step 1: Add watch tables to schema**
-
-Add to `packages/datastore/src/schema.ts` imports:
+- [ ] **Step 1: Update imports in schema.ts**
 
 ```typescript
 import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
 ```
 
-Add at the end of the file:
+- [ ] **Step 2: Add Auth.js tables at the end of schema.ts**
 
 ```typescript
-export const watchConditions = pgTable(
-  "watch_conditions",
+// Auth.js standard tables
+export const users = pgTable("user", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  email: text("email").unique(),
+  emailVerified: timestamp("emailVerified", { withTimezone: true, mode: "date" }),
+  image: text("image"),
+});
+
+export const accounts = pgTable(
+  "account",
+  {
+    userId: text("userId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    provider: text("provider").notNull(),
+    providerAccountId: text("providerAccountId").notNull(),
+    refresh_token: text("refresh_token"),
+    access_token: text("access_token"),
+    expires_at: integer("expires_at"),
+    token_type: text("token_type"),
+    scope: text("scope"),
+    id_token: text("id_token"),
+    session_state: text("session_state"),
+  },
+  (table) => [primaryKey({ columns: [table.provider, table.providerAccountId] })],
+);
+
+export const sessions = pgTable("session", {
+  sessionToken: text("sessionToken").primaryKey(),
+  userId: text("userId")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expires: timestamp("expires", { withTimezone: true, mode: "date" }).notNull(),
+});
+
+export const verificationTokens = pgTable(
+  "verificationToken",
+  {
+    identifier: text("identifier").notNull(),
+    token: text("token").notNull(),
+    expires: timestamp("expires", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.identifier, table.token] })],
+);
+```
+
+- [ ] **Step 3: Add watch tables at the end of schema.ts**
+
+```typescript
+export const webhooks = pgTable(
+  "webhooks",
   {
     id: text("id").primaryKey(),
-    token: text("token").notNull(),
-    label: text("label").notNull(),
-    query: text("query").notNull(),
-    targets: text("targets").notNull(),
-    filtersJson: text("filters_json"),
-    webhookUrl: text("webhook_url").notNull(),
-    webhookFormat: text("webhook_format").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    url: text("url").notNull(),
+    format: text("format").notNull(),
     isActive: boolean("is_active").notNull(),
-    lastClonedAt: timestamp("last_cloned_at", { withTimezone: true, mode: "string" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
-  (table) => [uniqueIndex("idx_watch_conditions_token").on(table.token)],
+  (table) => [index("idx_webhooks_user").on(table.userId)],
+);
+
+export const tagTriggers = pgTable(
+  "tag_triggers",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tag: text("tag").notNull(),
+    webhookId: text("webhook_id")
+      .notNull()
+      .references(() => webhooks.id, { onDelete: "cascade" }),
+    isActive: boolean("is_active").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    index("idx_tag_triggers_user").on(table.userId),
+    uniqueIndex("idx_tag_triggers_unique").on(table.userId, table.tag, table.webhookId),
+  ],
 );
 
 export const watchResults = pgTable(
   "watch_results",
   {
-    conditionId: text("condition_id")
-      .notNull()
-      .references(() => watchConditions.id, { onDelete: "cascade" }),
+    tag: text("tag").notNull(),
     contentId: text("content_id").notNull(),
     videoData: text("video_data").notNull(),
     discoveredAt: timestamp("discovered_at", { withTimezone: true, mode: "string" }).notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.conditionId, table.contentId] }),
+    primaryKey({ columns: [table.tag, table.contentId] }),
     index("idx_watch_results_discovered_at").on(table.discoveredAt),
   ],
 );
 
-export const watchNotifications = pgTable(
-  "watch_notifications",
+export const pendingNotifications = pgTable(
+  "pending_notifications",
   {
     id: text("id").primaryKey(),
-    conditionId: text("condition_id")
+    webhookId: text("webhook_id")
       .notNull()
-      .references(() => watchConditions.id, { onDelete: "cascade" }),
+      .references(() => webhooks.id, { onDelete: "cascade" }),
+    triggerType: text("trigger_type").notNull(),
+    triggerId: text("trigger_id").notNull(),
     contentId: text("content_id").notNull(),
-    notifiedAt: timestamp("notified_at", { withTimezone: true, mode: "string" }).notNull(),
+    payload: text("payload").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [index("idx_pending_notifications_created_at").on(table.createdAt)],
+);
+
+export const notificationLog = pgTable(
+  "notification_log",
+  {
+    id: text("id").primaryKey(),
+    webhookId: text("webhook_id").notNull(),
+    triggerType: text("trigger_type").notNull(),
+    triggerId: text("trigger_id").notNull(),
+    contentId: text("content_id").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true, mode: "string" }).notNull(),
+    success: boolean("success").notNull(),
   },
   (table) => [
-    uniqueIndex("idx_watch_notifs_unique").on(table.conditionId, table.contentId),
-    index("idx_watch_notifs_notified_at").on(table.notifiedAt),
+    uniqueIndex("idx_notification_log_unique").on(table.triggerId, table.contentId),
+    index("idx_notification_log_sent_at").on(table.sentAt),
   ],
 );
 ```
 
-- [ ] **Step 2: Update packages/datastore/src/index.ts**
+- [ ] **Step 4: Export all new tables from index.ts**
 
 ```typescript
 export { getDb } from "./connection";
 export {
+  accounts,
+  notificationLog,
+  pendingNotifications,
+  sessions,
+  tagTriggers,
   taglessCrawlStatus,
   taglessVideos,
+  users,
+  verificationTokens,
   videoEmbeddings,
-  watchConditions,
-  watchNotifications,
   watchResults,
+  webhooks,
 } from "./schema";
 ```
 
-- [ ] **Step 3: Push schema**
+- [ ] **Step 5: Push schema**
 
-Run: `pnpm --filter @nicolens/datastore db:push`
-Expected: 3 new tables created.
+```bash
+pnpm --filter @nicolens/datastore db:push
+```
 
-- [ ] **Step 5: Commit**
+Expected: 9 new tables created (user, account, session, verificationToken, webhooks, tag_triggers, watch_results, pending_notifications, notification_log).
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add packages/datastore/src/schema.ts packages/datastore/src/index.ts
-git commit -m "feat(db): add watch_conditions, watch_results, watch_notifications tables"
+git commit -m "feat(datastore): add Auth.js and watch tables to schema"
 ```
 
 ---
 
-### Task 3: Create apps/tag-scanner
+### Task 3: Install & Configure Auth.js
+
+GitHub OAuth による認証。
 
 **Files:**
-- Create: `apps/tag-scanner/package.json`
-- Create: `apps/tag-scanner/tsconfig.json`
-- Create: `apps/tag-scanner/src/clone-handler.ts`
-- Create: `apps/tag-scanner/src/index.ts`
+- Modify: `apps/web/package.json`
+- Create: `apps/web/src/auth.ts`
+- Create: `apps/web/src/middleware.ts`
+- Create: `apps/web/app/api/auth/[...nextauth]/route.ts`
+- Create: `apps/web/.env.example` (update)
 
-- [ ] **Step 1: Create apps/tag-scanner/package.json**
+- [ ] **Step 1: Install Auth.js packages**
+
+```bash
+pnpm --filter @nicolens/web add next-auth@beta @auth/drizzle-adapter
+```
+
+- [ ] **Step 2: Create auth config**
+
+`apps/web/src/auth.ts`:
+
+```typescript
+import { DrizzleAdapter } from "@auth/drizzle-adapter";
+import NextAuth from "next-auth";
+import GitHub from "next-auth/providers/github";
+
+import { accounts, getDb, sessions, users, verificationTokens } from "@nicolens/datastore";
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  adapter: DrizzleAdapter(getDb(), {
+    usersTable: users,
+    accountsTable: accounts,
+    sessionsTable: sessions,
+    verificationTokensTable: verificationTokens,
+  }),
+  providers: [GitHub],
+  session: { strategy: "database" },
+});
+```
+
+- [ ] **Step 3: Create middleware**
+
+`apps/web/src/middleware.ts`:
+
+```typescript
+export { auth as middleware } from "./auth";
+
+export const config = {
+  matcher: ["/watches/:path*", "/webhooks/:path*", "/api/watches/:path*", "/api/webhooks/:path*"],
+};
+```
+
+- [ ] **Step 4: Create Auth.js route handler**
+
+`apps/web/app/api/auth/[...nextauth]/route.ts`:
+
+```typescript
+import { handlers } from "@/auth";
+
+export const { GET, POST } = handlers;
+```
+
+- [ ] **Step 5: Update .env.example**
+
+Add to `apps/web/.env.example`:
+
+```
+AUTH_SECRET=your-auth-secret-here
+AUTH_GITHUB_ID=your-github-oauth-app-id
+AUTH_GITHUB_SECRET=your-github-oauth-app-secret
+```
+
+- [ ] **Step 6: Generate AUTH_SECRET for local dev**
+
+```bash
+pnpm --filter @nicolens/web dlx auth secret
+```
+
+Follow instructions to add it to `.env.local`.
+
+- [ ] **Step 7: Manual setup — Create GitHub OAuth App**
+
+Developer must:
+1. Go to https://github.com/settings/developers → New OAuth App
+2. Homepage URL: `http://localhost:3000`
+3. Callback URL: `http://localhost:3000/api/auth/callback/github`
+4. Copy Client ID → `AUTH_GITHUB_ID` in `.env.local`
+5. Generate Client Secret → `AUTH_GITHUB_SECRET` in `.env.local`
+
+- [ ] **Step 8: Verify**
+
+```bash
+pnpm typecheck
+pnpm dev
+```
+
+Navigate to `http://localhost:3000/api/auth/signin`. GitHub OAuth flow should work. After login, check DB: `SELECT * FROM "user"` should have one row.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add apps/web/src/auth.ts apps/web/src/middleware.ts "apps/web/app/api/auth/[...nextauth]/route.ts" apps/web/.env.example apps/web/package.json pnpm-lock.yaml
+git commit -m "feat(web): integrate Auth.js v5 with GitHub OAuth"
+```
+
+---
+
+### Task 4: Auth UI — Button & User Menu
+
+**Files:**
+- Create: `apps/web/src/features/auth/ui/auth-button.tsx`
+- Create: `apps/web/src/features/auth/ui/user-menu.tsx`
+- Create: `apps/web/src/features/auth/index.ts`
+- Modify: `apps/web/src/widgets/app-header/ui/app-header.tsx` (add AuthSlot)
+
+- [ ] **Step 1: Create AuthButton (server action based)**
+
+`apps/web/src/features/auth/ui/auth-button.tsx`:
+
+```typescript
+import { Github } from "lucide-react";
+
+import { signIn } from "@/auth";
+import { Button } from "@/shared/ui/button";
+
+export const AuthButton = () => {
+  const handleSignIn = async () => {
+    "use server";
+    await signIn("github", { redirectTo: "/" });
+  };
+
+  return (
+    <form action={handleSignIn}>
+      <Button type="submit" variant="outline" size="sm">
+        <Github className="mr-2 size-4" />
+        GitHubでログイン
+      </Button>
+    </form>
+  );
+};
+```
+
+- [ ] **Step 2: Create UserMenu**
+
+`apps/web/src/features/auth/ui/user-menu.tsx`:
+
+```typescript
+import { LogOut } from "lucide-react";
+import Link from "next/link";
+
+import { auth, signOut } from "@/auth";
+import { Button } from "@/shared/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/shared/ui/dropdown-menu";
+
+export const UserMenu = async () => {
+  const session = await auth();
+  if (!session?.user) {
+    return null;
+  }
+
+  const handleSignOut = async () => {
+    "use server";
+    await signOut({ redirectTo: "/" });
+  };
+
+  const initial = session.user.name?.[0] ?? session.user.email?.[0] ?? "?";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button variant="outline" size="icon-sm" aria-label="User menu">
+            {session.user.image !== null && session.user.image !== undefined ? (
+              <img
+                src={session.user.image}
+                alt={session.user.name ?? "User"}
+                className="size-6 rounded-full"
+              />
+            ) : (
+              <span className="text-xs font-medium">{initial}</span>
+            )}
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="w-48">
+        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+          {session.user.name ?? session.user.email}
+        </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem render={<Link href="/webhooks">Webhooks</Link>} />
+        <DropdownMenuItem render={<Link href="/watches">Tag Watches</Link>} />
+        <DropdownMenuSeparator />
+        <DropdownMenuItem>
+          <form action={handleSignOut} className="flex w-full">
+            <button type="submit" className="flex w-full items-center gap-2">
+              <LogOut className="size-4" />
+              ログアウト
+            </button>
+          </form>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+```
+
+- [ ] **Step 3: Create feature barrel**
+
+`apps/web/src/features/auth/index.ts`:
+
+```typescript
+export { AuthButton } from "./ui/auth-button";
+export { UserMenu } from "./ui/user-menu";
+```
+
+- [ ] **Step 4: Add AuthSlot to header**
+
+Check current structure of `apps/web/src/widgets/app-header/ui/app-header.tsx`. Add an auth slot that conditionally renders AuthButton or UserMenu:
+
+```typescript
+// In app-header.tsx, add to the header's right side:
+import { AuthButton, UserMenu } from "@/features/auth";
+import { auth } from "@/auth";
+
+// In the component (make it async):
+const session = await auth();
+
+// In JSX, add to the right-side slot:
+{session?.user ? <UserMenu /> : <AuthButton />}
+```
+
+Note: `app-header.tsx` must become an async server component for this.
+
+- [ ] **Step 5: Verify**
+
+```bash
+pnpm typecheck && pnpm lint
+pnpm dev
+```
+
+Visit `http://localhost:3000`, click GitHub login, verify UserMenu appears after login.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add apps/web/src/features/auth/ apps/web/src/widgets/app-header/
+git commit -m "feat(web): add auth button and user menu to header"
+```
+
+---
+
+### Task 5: Webhook CRUD API
+
+**Files:**
+- Create: `apps/web/app/api/webhooks/route.ts`
+- Create: `apps/web/app/api/webhooks/[id]/route.ts`
+
+- [ ] **Step 1: Implement GET & POST /api/webhooks**
+
+`apps/web/app/api/webhooks/route.ts`:
+
+```typescript
+import { desc, eq } from "drizzle-orm";
+import { type NextRequest, NextResponse } from "next/server";
+
+import { getDb, webhooks } from "@nicolens/datastore";
+
+import { auth } from "@/auth";
+
+const HTTP_UNAUTHORIZED = 401;
+const HTTP_BAD_REQUEST = 400;
+const BLOCKED = new Set(["localhost", "0.0.0.0", "[::1]"]);
+const VALID_FORMATS = new Set(["generic", "discord"]);
+
+const isValidHttpsUrl = (url: string): boolean => {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  const h = parsed.hostname;
+  if (BLOCKED.has(h)) return false;
+  if (h.startsWith("127.") || h.startsWith("10.") || h.startsWith("192.168.") || h.startsWith("169.254.")) return false;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
+  return true;
+};
+
+export const GET = async () => {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: HTTP_UNAUTHORIZED });
+  }
+
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(webhooks)
+    .where(eq(webhooks.userId, session.user.id))
+    .orderBy(desc(webhooks.createdAt));
+
+  return NextResponse.json({ webhooks: rows });
+};
+
+export const POST = async (request: NextRequest) => {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: HTTP_UNAUTHORIZED });
+  }
+
+  const body: unknown = await request.json().catch(() => null);
+  if (typeof body !== "object" || body === null) {
+    return NextResponse.json({ error: "Invalid body" }, { status: HTTP_BAD_REQUEST });
+  }
+
+  const b = body as Record<string, unknown>;
+  const name = typeof b["name"] === "string" ? b["name"].trim() : "";
+  const url = typeof b["url"] === "string" ? b["url"].trim() : "";
+  const format = typeof b["format"] === "string" && VALID_FORMATS.has(b["format"]) ? b["format"] : "generic";
+
+  if (name === "") {
+    return NextResponse.json({ error: "name required" }, { status: HTTP_BAD_REQUEST });
+  }
+  if (!isValidHttpsUrl(url)) {
+    return NextResponse.json({ error: "Invalid webhook URL" }, { status: HTTP_BAD_REQUEST });
+  }
+
+  const id = crypto.randomUUID();
+  const db = getDb();
+  await db.insert(webhooks).values({
+    id,
+    userId: session.user.id,
+    name,
+    url,
+    format,
+    isActive: true,
+    createdAt: new Date().toISOString(),
+  });
+
+  return NextResponse.json({ id });
+};
+```
+
+- [ ] **Step 2: Implement PATCH & DELETE /api/webhooks/[id]**
+
+`apps/web/app/api/webhooks/[id]/route.ts`:
+
+```typescript
+import { and, eq } from "drizzle-orm";
+import { type NextRequest, NextResponse } from "next/server";
+
+import { getDb, webhooks } from "@nicolens/datastore";
+
+import { auth } from "@/auth";
+
+const HTTP_UNAUTHORIZED = 401;
+const HTTP_NOT_FOUND = 404;
+const HTTP_BAD_REQUEST = 400;
+
+interface RouteParams {
+  params: Promise<{ id: string }>;
+}
+
+export const PATCH = async (request: NextRequest, { params }: RouteParams) => {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: HTTP_UNAUTHORIZED });
+  }
+
+  const { id } = await params;
+  const body: unknown = await request.json().catch(() => null);
+  if (typeof body !== "object" || body === null) {
+    return NextResponse.json({ error: "Invalid body" }, { status: HTTP_BAD_REQUEST });
+  }
+
+  const b = body as Record<string, unknown>;
+  const updates: Record<string, unknown> = {};
+  if (typeof b["name"] === "string") updates["name"] = b["name"].trim();
+  if (typeof b["isActive"] === "boolean") updates["isActive"] = b["isActive"];
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: "No fields to update" }, { status: HTTP_BAD_REQUEST });
+  }
+
+  const db = getDb();
+  const result = await db
+    .update(webhooks)
+    .set(updates)
+    .where(and(eq(webhooks.id, id), eq(webhooks.userId, session.user.id)))
+    .returning({ id: webhooks.id });
+
+  if (result.length === 0) {
+    return NextResponse.json({ error: "Not found" }, { status: HTTP_NOT_FOUND });
+  }
+  return NextResponse.json({ success: true });
+};
+
+export const DELETE = async (_request: NextRequest, { params }: RouteParams) => {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: HTTP_UNAUTHORIZED });
+  }
+
+  const { id } = await params;
+  const db = getDb();
+  const result = await db
+    .delete(webhooks)
+    .where(and(eq(webhooks.id, id), eq(webhooks.userId, session.user.id)))
+    .returning({ id: webhooks.id });
+
+  if (result.length === 0) {
+    return NextResponse.json({ error: "Not found" }, { status: HTTP_NOT_FOUND });
+  }
+  return NextResponse.json({ success: true });
+};
+```
+
+- [ ] **Step 3: Verify**
+
+```bash
+pnpm typecheck
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/web/app/api/webhooks/
+git commit -m "feat(web): add webhooks CRUD API routes"
+```
+
+---
+
+### Task 6: Tag Trigger CRUD API
+
+**Files:**
+- Create: `apps/web/app/api/watches/route.ts`
+- Create: `apps/web/app/api/watches/[id]/route.ts`
+
+- [ ] **Step 1: Implement GET & POST /api/watches**
+
+`apps/web/app/api/watches/route.ts`:
+
+```typescript
+import { and, desc, eq } from "drizzle-orm";
+import { type NextRequest, NextResponse } from "next/server";
+
+import { getDb, tagTriggers, webhooks } from "@nicolens/datastore";
+
+import { auth } from "@/auth";
+
+const HTTP_UNAUTHORIZED = 401;
+const HTTP_BAD_REQUEST = 400;
+
+export const GET = async () => {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: HTTP_UNAUTHORIZED });
+  }
+
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: tagTriggers.id,
+      tag: tagTriggers.tag,
+      webhookId: tagTriggers.webhookId,
+      webhookName: webhooks.name,
+      isActive: tagTriggers.isActive,
+      createdAt: tagTriggers.createdAt,
+    })
+    .from(tagTriggers)
+    .innerJoin(webhooks, eq(tagTriggers.webhookId, webhooks.id))
+    .where(eq(tagTriggers.userId, session.user.id))
+    .orderBy(desc(tagTriggers.createdAt));
+
+  return NextResponse.json({ triggers: rows });
+};
+
+export const POST = async (request: NextRequest) => {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: HTTP_UNAUTHORIZED });
+  }
+
+  const body: unknown = await request.json().catch(() => null);
+  if (typeof body !== "object" || body === null) {
+    return NextResponse.json({ error: "Invalid body" }, { status: HTTP_BAD_REQUEST });
+  }
+
+  const b = body as Record<string, unknown>;
+  const tag = typeof b["tag"] === "string" ? b["tag"].trim() : "";
+  const webhookId = typeof b["webhookId"] === "string" ? b["webhookId"] : "";
+
+  if (tag === "" || webhookId === "") {
+    return NextResponse.json({ error: "tag and webhookId required" }, { status: HTTP_BAD_REQUEST });
+  }
+
+  // Verify webhook ownership
+  const db = getDb();
+  const ownedWebhook = await db
+    .select({ id: webhooks.id })
+    .from(webhooks)
+    .where(and(eq(webhooks.id, webhookId), eq(webhooks.userId, session.user.id)))
+    .limit(1);
+
+  if (ownedWebhook.length === 0) {
+    return NextResponse.json({ error: "Webhook not found" }, { status: HTTP_BAD_REQUEST });
+  }
+
+  const id = crypto.randomUUID();
+  await db
+    .insert(tagTriggers)
+    .values({
+      id,
+      userId: session.user.id,
+      tag,
+      webhookId,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+    })
+    .onConflictDoNothing();
+
+  return NextResponse.json({ id });
+};
+```
+
+- [ ] **Step 2: Implement PATCH & DELETE /api/watches/[id]**
+
+`apps/web/app/api/watches/[id]/route.ts`:
+
+```typescript
+import { and, eq } from "drizzle-orm";
+import { type NextRequest, NextResponse } from "next/server";
+
+import { getDb, tagTriggers } from "@nicolens/datastore";
+
+import { auth } from "@/auth";
+
+const HTTP_UNAUTHORIZED = 401;
+const HTTP_NOT_FOUND = 404;
+const HTTP_BAD_REQUEST = 400;
+
+interface RouteParams {
+  params: Promise<{ id: string }>;
+}
+
+export const PATCH = async (request: NextRequest, { params }: RouteParams) => {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: HTTP_UNAUTHORIZED });
+  }
+
+  const { id } = await params;
+  const body: unknown = await request.json().catch(() => null);
+  if (typeof body !== "object" || body === null) {
+    return NextResponse.json({ error: "Invalid body" }, { status: HTTP_BAD_REQUEST });
+  }
+
+  const b = body as Record<string, unknown>;
+  const updates: Record<string, unknown> = {};
+  if (typeof b["isActive"] === "boolean") updates["isActive"] = b["isActive"];
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: "No fields" }, { status: HTTP_BAD_REQUEST });
+  }
+
+  const db = getDb();
+  const result = await db
+    .update(tagTriggers)
+    .set(updates)
+    .where(and(eq(tagTriggers.id, id), eq(tagTriggers.userId, session.user.id)))
+    .returning({ id: tagTriggers.id });
+
+  if (result.length === 0) {
+    return NextResponse.json({ error: "Not found" }, { status: HTTP_NOT_FOUND });
+  }
+  return NextResponse.json({ success: true });
+};
+
+export const DELETE = async (_request: NextRequest, { params }: RouteParams) => {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: HTTP_UNAUTHORIZED });
+  }
+
+  const { id } = await params;
+  const db = getDb();
+  const result = await db
+    .delete(tagTriggers)
+    .where(and(eq(tagTriggers.id, id), eq(tagTriggers.userId, session.user.id)))
+    .returning({ id: tagTriggers.id });
+
+  if (result.length === 0) {
+    return NextResponse.json({ error: "Not found" }, { status: HTTP_NOT_FOUND });
+  }
+  return NextResponse.json({ success: true });
+};
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add apps/web/app/api/watches/
+git commit -m "feat(web): add tag trigger CRUD API routes"
+```
+
+---
+
+### Task 7: /webhooks Page
+
+**Files:**
+- Create: `apps/web/src/features/webhook/ui/webhook-list.tsx`
+- Create: `apps/web/src/features/webhook/ui/webhook-form.tsx`
+- Create: `apps/web/src/features/webhook/index.ts`
+- Create: `apps/web/src/pages/webhooks/ui/webhooks-page.tsx`
+- Create: `apps/web/src/pages/webhooks/index.ts`
+- Create: `apps/web/app/webhooks/page.tsx`
+
+- [ ] **Step 1: Create WebhookForm (client)**
+
+`apps/web/src/features/webhook/ui/webhook-form.tsx`:
+
+```typescript
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+
+import { Button } from "@/shared/ui/button";
+import { Input } from "@/shared/ui/input";
+import { Label } from "@/shared/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
+
+const formatSelectValue = (value: unknown): string => {
+  if (value === "discord") return "Discord";
+  return "Generic";
+};
+
+export const WebhookForm = () => {
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [format, setFormat] = useState("generic");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+
+    const response = await fetch("/api/webhooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim(), url: url.trim(), format }),
+    });
+
+    if (!response.ok) {
+      const data = (await response.json()) as { error?: string };
+      setError(data.error ?? "Failed to create webhook");
+      setSubmitting(false);
+      return;
+    }
+
+    setName("");
+    setUrl("");
+    setSubmitting(false);
+    router.refresh();
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3 rounded-md border p-4">
+      <h3 className="text-sm font-medium">Webhookを追加</h3>
+      <div className="space-y-1">
+        <Label className="text-xs">名前</Label>
+        <Input value={name} onChange={(e) => { setName(e.target.value); }} placeholder="My Discord" required />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">URL (https only)</Label>
+        <Input type="url" value={url} onChange={(e) => { setUrl(e.target.value); }} placeholder="https://discord.com/api/webhooks/..." required />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">形式</Label>
+        <Select value={format} onValueChange={setFormat}>
+          <SelectTrigger><SelectValue>{formatSelectValue}</SelectValue></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="generic">Generic</SelectItem>
+            <SelectItem value="discord">Discord</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {error !== null && <p className="text-xs text-destructive">{error}</p>}
+      <Button type="submit" disabled={submitting}>{submitting ? "追加中..." : "追加"}</Button>
+    </form>
+  );
+};
+```
+
+- [ ] **Step 2: Create WebhookList (client)**
+
+`apps/web/src/features/webhook/ui/webhook-list.tsx`:
+
+```typescript
+"use client";
+
+import { Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+import { Button } from "@/shared/ui/button";
+
+interface WebhookEntry {
+  id: string;
+  name: string;
+  url: string;
+  format: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+interface WebhookListProps {
+  webhooks: WebhookEntry[];
+}
+
+const maskUrl = (url: string): string => {
+  if (url.length <= 30) return url;
+  return `${url.slice(0, 20)}...${url.slice(-6)}`;
+};
+
+export const WebhookList = ({ webhooks }: WebhookListProps) => {
+  const router = useRouter();
+
+  const handleDelete = async (id: string) => {
+    if (!globalThis.confirm("削除しますか?")) return;
+    await fetch(`/api/webhooks/${id}`, { method: "DELETE" });
+    router.refresh();
+  };
+
+  if (webhooks.length === 0) {
+    return <p className="text-sm text-muted-foreground">Webhookが登録されていません</p>;
+  }
+
+  return (
+    <ul className="space-y-2">
+      {webhooks.map((w) => (
+        <li key={w.id} className="flex items-center justify-between rounded-md border p-3 text-sm">
+          <div className="flex-1 space-y-1">
+            <div className="font-medium">{w.name}</div>
+            <div className="font-mono text-xs text-muted-foreground">{maskUrl(w.url)}</div>
+            <div className="text-xs text-muted-foreground">形式: {w.format === "discord" ? "Discord" : "Generic"}</div>
+          </div>
+          <Button variant="ghost" size="icon-sm" onClick={() => void handleDelete(w.id)} aria-label="削除">
+            <Trash2 className="size-4" />
+          </Button>
+        </li>
+      ))}
+    </ul>
+  );
+};
+```
+
+- [ ] **Step 3: Create feature barrel**
+
+`apps/web/src/features/webhook/index.ts`:
+
+```typescript
+export { WebhookForm } from "./ui/webhook-form";
+export { WebhookList } from "./ui/webhook-list";
+```
+
+- [ ] **Step 4: Create page composition (server component)**
+
+`apps/web/src/pages/webhooks/ui/webhooks-page.tsx`:
+
+```typescript
+import { desc, eq } from "drizzle-orm";
+
+import { getDb, webhooks } from "@nicolens/datastore";
+
+import { auth } from "@/auth";
+import { WebhookForm, WebhookList } from "@/features/webhook";
+
+export const WebhooksPage = async () => {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return <p className="p-8 text-center">ログインが必要です</p>;
+  }
+
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(webhooks)
+    .where(eq(webhooks.userId, session.user.id))
+    .orderBy(desc(webhooks.createdAt));
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-6 p-6">
+      <h1 className="text-2xl font-bold">Webhooks</h1>
+      <WebhookForm />
+      <WebhookList webhooks={rows} />
+    </div>
+  );
+};
+```
+
+`apps/web/src/pages/webhooks/index.ts`:
+
+```typescript
+export { WebhooksPage } from "./ui/webhooks-page";
+```
+
+- [ ] **Step 5: Create app router page**
+
+`apps/web/app/webhooks/page.tsx`:
+
+```typescript
+import { WebhooksPage } from "@/pages/webhooks";
+
+// oxlint-disable-next-line import/no-default-export -- Next.js page requires default export
+export default function WebhooksRoute() {
+  return <WebhooksPage />;
+}
+```
+
+- [ ] **Step 6: Verify**
+
+```bash
+pnpm typecheck && pnpm lint
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/web/src/features/webhook/ apps/web/src/pages/webhooks/ apps/web/app/webhooks/
+git commit -m "feat(web): add webhooks management page"
+```
+
+---
+
+### Task 8: /watches Page
+
+**Files:**
+- Create: `apps/web/src/features/tag-watch/ui/tag-watch-list.tsx`
+- Create: `apps/web/src/features/tag-watch/ui/tag-watch-form.tsx`
+- Create: `apps/web/src/features/tag-watch/index.ts`
+- Create: `apps/web/src/pages/watches/ui/watches-page.tsx`
+- Create: `apps/web/src/pages/watches/index.ts`
+- Create: `apps/web/app/watches/page.tsx`
+
+- [ ] **Step 1: Create TagWatchForm**
+
+`apps/web/src/features/tag-watch/ui/tag-watch-form.tsx`:
+
+```typescript
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+
+import { Button } from "@/shared/ui/button";
+import { Input } from "@/shared/ui/input";
+import { Label } from "@/shared/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
+
+interface WebhookOption {
+  id: string;
+  name: string;
+}
+
+interface TagWatchFormProps {
+  webhooks: WebhookOption[];
+}
+
+const makeFormatSelectValue = (webhooks: WebhookOption[]) => (value: unknown): string => {
+  if (typeof value !== "string") return "Webhookを選択";
+  return webhooks.find((w) => w.id === value)?.name ?? "Webhookを選択";
+};
+
+export const TagWatchForm = ({ webhooks }: TagWatchFormProps) => {
+  const router = useRouter();
+  const [tag, setTag] = useState("");
+  const [webhookId, setWebhookId] = useState(webhooks[0]?.id ?? "");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+
+    const response = await fetch("/api/watches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tag: tag.trim(), webhookId }),
+    });
+
+    if (!response.ok) {
+      const data = (await response.json()) as { error?: string };
+      setError(data.error ?? "Failed");
+      setSubmitting(false);
+      return;
+    }
+
+    setTag("");
+    setSubmitting(false);
+    router.refresh();
+  };
+
+  if (webhooks.length === 0) {
+    return (
+      <div className="rounded-md border p-4 text-sm">
+        <p>まず <a href="/webhooks" className="underline">Webhooks</a> を登録してください</p>
+      </div>
+    );
+  }
+
+  const formatValue = makeFormatSelectValue(webhooks);
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3 rounded-md border p-4">
+      <h3 className="text-sm font-medium">タグ監視を追加</h3>
+      <div className="space-y-1">
+        <Label className="text-xs">タグ</Label>
+        <Input value={tag} onChange={(e) => { setTag(e.target.value); }} placeholder="VOCALOID" required />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">通知先 Webhook</Label>
+        <Select value={webhookId} onValueChange={setWebhookId}>
+          <SelectTrigger><SelectValue>{formatValue}</SelectValue></SelectTrigger>
+          <SelectContent>
+            {webhooks.map((w) => (
+              <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {error !== null && <p className="text-xs text-destructive">{error}</p>}
+      <Button type="submit" disabled={submitting}>{submitting ? "追加中..." : "追加"}</Button>
+    </form>
+  );
+};
+```
+
+- [ ] **Step 2: Create TagWatchList**
+
+`apps/web/src/features/tag-watch/ui/tag-watch-list.tsx`:
+
+```typescript
+"use client";
+
+import { Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+import { Badge } from "@/shared/ui/badge";
+import { Button } from "@/shared/ui/button";
+
+interface TagWatchEntry {
+  id: string;
+  tag: string;
+  webhookName: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+interface TagWatchListProps {
+  triggers: TagWatchEntry[];
+}
+
+export const TagWatchList = ({ triggers }: TagWatchListProps) => {
+  const router = useRouter();
+
+  const handleDelete = async (id: string) => {
+    if (!globalThis.confirm("削除しますか?")) return;
+    await fetch(`/api/watches/${id}`, { method: "DELETE" });
+    router.refresh();
+  };
+
+  const handleToggle = async (id: string, isActive: boolean) => {
+    await fetch(`/api/watches/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isActive: !isActive }),
+    });
+    router.refresh();
+  };
+
+  if (triggers.length === 0) {
+    return <p className="text-sm text-muted-foreground">タグ監視が登録されていません</p>;
+  }
+
+  return (
+    <ul className="space-y-2">
+      {triggers.map((t) => (
+        <li key={t.id} className="flex items-center justify-between rounded-md border p-3 text-sm">
+          <div className="flex-1 space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="font-mono font-medium">#{t.tag}</span>
+              <Badge variant={t.isActive ? "default" : "secondary"}>
+                {t.isActive ? "有効" : "停止中"}
+              </Badge>
+            </div>
+            <div className="text-xs text-muted-foreground">→ {t.webhookName}</div>
+          </div>
+          <div className="flex gap-1">
+            <Button variant="ghost" size="sm" onClick={() => void handleToggle(t.id, t.isActive)}>
+              {t.isActive ? "停止" : "再開"}
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={() => void handleDelete(t.id)} aria-label="削除">
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+};
+```
+
+- [ ] **Step 3: Create feature barrel**
+
+`apps/web/src/features/tag-watch/index.ts`:
+
+```typescript
+export { TagWatchForm } from "./ui/tag-watch-form";
+export { TagWatchList } from "./ui/tag-watch-list";
+```
+
+- [ ] **Step 4: Create page composition**
+
+`apps/web/src/pages/watches/ui/watches-page.tsx`:
+
+```typescript
+import { desc, eq } from "drizzle-orm";
+
+import { getDb, tagTriggers, webhooks } from "@nicolens/datastore";
+
+import { auth } from "@/auth";
+import { TagWatchForm, TagWatchList } from "@/features/tag-watch";
+
+export const WatchesPage = async () => {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return <p className="p-8 text-center">ログインが必要です</p>;
+  }
+
+  const db = getDb();
+  const [userWebhooks, triggers] = await Promise.all([
+    db
+      .select({ id: webhooks.id, name: webhooks.name })
+      .from(webhooks)
+      .where(eq(webhooks.userId, session.user.id)),
+    db
+      .select({
+        id: tagTriggers.id,
+        tag: tagTriggers.tag,
+        webhookName: webhooks.name,
+        isActive: tagTriggers.isActive,
+        createdAt: tagTriggers.createdAt,
+      })
+      .from(tagTriggers)
+      .innerJoin(webhooks, eq(tagTriggers.webhookId, webhooks.id))
+      .where(eq(tagTriggers.userId, session.user.id))
+      .orderBy(desc(tagTriggers.createdAt)),
+  ]);
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-6 p-6">
+      <h1 className="text-2xl font-bold">Tag Watches</h1>
+      <TagWatchForm webhooks={userWebhooks} />
+      <TagWatchList triggers={triggers} />
+    </div>
+  );
+};
+```
+
+`apps/web/src/pages/watches/index.ts`:
+
+```typescript
+export { WatchesPage } from "./ui/watches-page";
+```
+
+- [ ] **Step 5: Create app router page**
+
+`apps/web/app/watches/page.tsx`:
+
+```typescript
+import { WatchesPage } from "@/pages/watches";
+
+// oxlint-disable-next-line import/no-default-export -- Next.js page requires default export
+export default function WatchesRoute() {
+  return <WatchesPage />;
+}
+```
+
+- [ ] **Step 6: Verify**
+
+```bash
+pnpm typecheck && pnpm lint
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/web/src/features/tag-watch/ apps/web/src/pages/watches/ apps/web/app/watches/
+git commit -m "feat(web): add tag watches management page"
+```
+
+---
+
+### Task 9: packages/nicovideo-snapshot-api
+
+Snapshot API クライアントを共有パッケージとして抽出する。apps/snapshot-syncer がこれを利用する。
+
+**Files:**
+- Create: `packages/nicovideo-snapshot-api/package.json`
+- Create: `packages/nicovideo-snapshot-api/tsconfig.json`
+- Create: `packages/nicovideo-snapshot-api/vitest.config.ts`
+- Create: `packages/nicovideo-snapshot-api/src/types.ts`
+- Create: `packages/nicovideo-snapshot-api/src/query-builder.ts`
+- Create: `packages/nicovideo-snapshot-api/src/query-builder.test.ts`
+- Create: `packages/nicovideo-snapshot-api/src/client.ts`
+- Create: `packages/nicovideo-snapshot-api/src/index.ts`
+
+- [ ] **Step 1: Create package.json**
 
 ```json
 {
-  "name": "@nicolens/tag-scanner",
+  "name": "@nicolens/nicovideo-snapshot-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsgo --noEmit"
+  },
+  "devDependencies": {
+    "@nicolens/tsconfig": "workspace:*",
+    "@typescript/native-preview": "7.0.0-dev.20260307.1",
+    "typescript": "^5",
+    "vitest": "^4.0.18"
+  }
+}
+```
+
+- [ ] **Step 2: Create tsconfig.json and vitest.config.ts**
+
+`packages/nicovideo-snapshot-api/tsconfig.json`:
+```json
+{
+  "extends": "@nicolens/tsconfig/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}
+```
+
+`packages/nicovideo-snapshot-api/vitest.config.ts`:
+```typescript
+import { defineConfig } from "vitest/config";
+
+// oxlint-disable-next-line import/no-default-export
+export default defineConfig({
+  test: { include: ["src/**/*.test.ts"] },
+});
+```
+
+- [ ] **Step 3: Create types.ts**
+
+`packages/nicovideo-snapshot-api/src/types.ts`:
+
+```typescript
+export interface VideoContent {
+  contentId: string;
+  title: string;
+  description?: string;
+  userId?: number;
+  channelId?: number;
+  viewCounter: number;
+  mylistCounter: number;
+  likeCounter: number;
+  lengthSeconds: number;
+  thumbnailUrl: string;
+  startTime: string;
+  lastResBody?: string;
+  commentCounter: number;
+  lastCommentTime?: string;
+  categoryTags?: string;
+  tags?: string;
+  genre?: string;
+}
+
+export interface SnapshotMeta {
+  status: number;
+  totalCount: number;
+  id?: string;
+}
+
+export interface SnapshotSearchResponse {
+  meta: SnapshotMeta;
+  data: VideoContent[];
+}
+
+export interface SnapshotErrorResponse {
+  meta: {
+    status: number;
+    errorCode: string;
+    errorMessage: string;
+  };
+}
+
+export interface SearchFilters {
+  [field: string]: Record<string, string>;
+}
+
+export interface SearchOptions {
+  query: string;
+  targets: string;
+  fields?: string;
+  sort?: string;
+  limit?: number;
+  offset?: number;
+  filters?: SearchFilters;
+  context?: string;
+  userAgent: string;
+}
+```
+
+- [ ] **Step 4: Write failing test for query-builder**
+
+`packages/nicovideo-snapshot-api/src/query-builder.test.ts`:
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { buildSearchUrl } from "./query-builder";
+
+describe("buildSearchUrl", () => {
+  it("builds URL with required params", () => {
+    const url = buildSearchUrl({
+      query: "VOCALOID",
+      targets: "tagsExact",
+      userAgent: "test/1.0",
+    });
+    expect(url).toContain("q=VOCALOID");
+    expect(url).toContain("targets=tagsExact");
+  });
+
+  it("includes sort and limit when provided", () => {
+    const url = buildSearchUrl({
+      query: "test",
+      targets: "title",
+      sort: "-startTime",
+      limit: 50,
+      userAgent: "test/1.0",
+    });
+    expect(url).toContain("_sort=-startTime");
+    expect(url).toContain("_limit=50");
+  });
+
+  it("encodes filters as filters[field][op]=value", () => {
+    const url = buildSearchUrl({
+      query: "test",
+      targets: "title",
+      filters: {
+        startTime: { gte: "2026-04-11T00:00:00+09:00" },
+        viewCounter: { gte: "1000" },
+      },
+      userAgent: "test/1.0",
+    });
+    expect(decodeURIComponent(url)).toContain("filters[startTime][gte]=2026-04-11T00:00:00+09:00");
+    expect(decodeURIComponent(url)).toContain("filters[viewCounter][gte]=1000");
+  });
+
+  it("uses default context when not provided", () => {
+    const url = buildSearchUrl({
+      query: "test",
+      targets: "title",
+      userAgent: "test/1.0",
+    });
+    expect(url).toContain("_context=");
+  });
+});
+```
+
+- [ ] **Step 5: Run test to verify failure**
+
+```bash
+pnpm --filter @nicolens/nicovideo-snapshot-api test
+```
+
+Expected: FAIL.
+
+- [ ] **Step 6: Implement query-builder.ts**
+
+`packages/nicovideo-snapshot-api/src/query-builder.ts`:
+
+```typescript
+import type { SearchOptions } from "./types";
+
+const SNAPSHOT_API = "https://snapshot.search.nicovideo.jp/api/v2/snapshot/video/contents/search";
+const DEFAULT_FIELDS = "contentId,title,description,userId,channelId,viewCounter,mylistCounter,likeCounter,lengthSeconds,thumbnailUrl,startTime,lastResBody,commentCounter,lastCommentTime,categoryTags,tags,genre";
+const DEFAULT_CONTEXT = "nicolens";
+
+export const buildSearchUrl = (options: SearchOptions): string => {
+  const params = new URLSearchParams({
+    q: options.query,
+    targets: options.targets,
+    fields: options.fields ?? DEFAULT_FIELDS,
+    _context: options.context ?? DEFAULT_CONTEXT,
+  });
+
+  if (options.sort !== undefined) {
+    params.set("_sort", options.sort);
+  }
+  if (options.limit !== undefined) {
+    params.set("_limit", String(options.limit));
+  }
+  if (options.offset !== undefined) {
+    params.set("_offset", String(options.offset));
+  }
+
+  if (options.filters !== undefined) {
+    for (const [field, ops] of Object.entries(options.filters)) {
+      for (const [op, val] of Object.entries(ops)) {
+        params.set(`filters[${field}][${op}]`, val);
+      }
+    }
+  }
+
+  return `${SNAPSHOT_API}?${params.toString()}`;
+};
+```
+
+- [ ] **Step 7: Run test to verify pass**
+
+```bash
+pnpm --filter @nicolens/nicovideo-snapshot-api test
+```
+
+Expected: PASS.
+
+- [ ] **Step 8: Implement client.ts**
+
+`packages/nicovideo-snapshot-api/src/client.ts`:
+
+```typescript
+import { buildSearchUrl } from "./query-builder";
+import type { SearchOptions, SnapshotErrorResponse, SnapshotSearchResponse } from "./types";
+
+const isSearchResponse = (value: unknown): value is SnapshotSearchResponse =>
+  typeof value === "object" &&
+  value !== null &&
+  "meta" in value &&
+  "data" in value &&
+  Array.isArray((value as SnapshotSearchResponse).data);
+
+const isErrorResponse = (value: unknown): value is SnapshotErrorResponse =>
+  typeof value === "object" &&
+  value !== null &&
+  "meta" in value &&
+  typeof (value as SnapshotErrorResponse).meta.errorCode === "string";
+
+export class SnapshotApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly errorCode: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SnapshotApiError";
+  }
+}
+
+export const searchSnapshot = async (
+  options: SearchOptions,
+): Promise<SnapshotSearchResponse> => {
+  const url = buildSearchUrl(options);
+
+  const response = await fetch(url, {
+    headers: { "User-Agent": options.userAgent },
+  });
+
+  const json: unknown = await response.json();
+
+  if (isErrorResponse(json)) {
+    throw new SnapshotApiError(json.meta.status, json.meta.errorCode, json.meta.errorMessage);
+  }
+
+  if (!isSearchResponse(json)) {
+    throw new SnapshotApiError(response.status, "INVALID_RESPONSE", "Invalid API response format");
+  }
+
+  return json;
+};
+```
+
+- [ ] **Step 9: Create index.ts**
+
+`packages/nicovideo-snapshot-api/src/index.ts`:
+
+```typescript
+export { SnapshotApiError, searchSnapshot } from "./client";
+export { buildSearchUrl } from "./query-builder";
+export type {
+  SearchFilters,
+  SearchOptions,
+  SnapshotErrorResponse,
+  SnapshotMeta,
+  SnapshotSearchResponse,
+  VideoContent,
+} from "./types";
+```
+
+- [ ] **Step 10: Verify**
+
+```bash
+pnpm install
+pnpm --filter @nicolens/nicovideo-snapshot-api test
+pnpm --filter @nicolens/nicovideo-snapshot-api typecheck
+```
+
+- [ ] **Step 11: Commit**
+
+```bash
+git add packages/nicovideo-snapshot-api/ pnpm-lock.yaml
+git commit -m "feat: add packages/nicovideo-snapshot-api client package"
+```
+
+---
+
+### Task 10: apps/snapshot-syncer
+
+**Files:**
+- Create: `apps/snapshot-syncer/package.json`
+- Create: `apps/snapshot-syncer/tsconfig.json`
+- Create: `apps/snapshot-syncer/src/sync-handler.ts`
+- Create: `apps/snapshot-syncer/src/index.ts`
+
+- [ ] **Step 1: Create package.json**
+
+```json
+{
+  "name": "@nicolens/snapshot-syncer",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
     "@nicolens/datastore": "workspace:*",
+    "@nicolens/nicovideo-snapshot-api": "workspace:*",
     "drizzle-orm": "^0.45.1"
   },
   "devDependencies": {
     "@nicolens/tsconfig": "workspace:*",
+    "@typescript/native-preview": "7.0.0-dev.20260307.1",
     "tsx": "^4.19.0",
     "typescript": "^5"
   }
 }
 ```
 
-- [ ] **Step 2: Create apps/tag-scanner/tsconfig.json**
+- [ ] **Step 2: Create tsconfig.json**
 
 ```json
 {
@@ -384,149 +1918,86 @@ git commit -m "feat(db): add watch_conditions, watch_results, watch_notification
 }
 ```
 
-- [ ] **Step 3: Implement clone-handler.ts**
+- [ ] **Step 3: Implement sync-handler.ts**
 
-`apps/tag-scanner/src/clone-handler.ts`:
+`apps/snapshot-syncer/src/sync-handler.ts`:
 
 ```typescript
 import { eq, lt } from "drizzle-orm";
 
-import { getDb, watchConditions, watchResults } from "@nicolens/datastore";
+import { getDb, tagTriggers, watchResults } from "@nicolens/datastore";
+import { SnapshotApiError, searchSnapshot } from "@nicolens/nicovideo-snapshot-api";
 
-const SNAPSHOT_API = "https://snapshot.search.nicovideo.jp/api/v2/snapshot/video/contents/search";
-const SNAPSHOT_FIELDS =
-  "contentId,title,description,userId,channelId,viewCounter,mylistCounter,likeCounter,lengthSeconds,thumbnailUrl,startTime,lastResBody,commentCounter,lastCommentTime,categoryTags,tags,genre";
-const SNAPSHOT_LIMIT = 100;
+const LIMIT = 100;
 const RETENTION_DAYS = 90;
 const MS_PER_DAY = 86400000;
 const RATE_LIMIT_MS = 200;
-
-interface SnapshotVideo {
-  contentId: string;
-  [key: string]: unknown;
-}
-
-interface SnapshotApiResponse {
-  meta: { status: number; totalCount: number };
-  data: SnapshotVideo[];
-}
-
-const isSnapshotResponse = (value: unknown): value is SnapshotApiResponse =>
-  typeof value === "object" &&
-  value !== null &&
-  "data" in value &&
-  Array.isArray((value as SnapshotApiResponse).data);
+const USER_AGENT = "nicolens-snapshot-syncer/1.0";
 
 const wait = (ms: number): Promise<void> =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
 
-const buildSnapshotUrl = (
-  query: string,
-  targets: string,
-  filtersJson: string | null,
-  since: string,
-): string => {
-  const params = new URLSearchParams({
-    q: query,
-    targets,
-    fields: SNAPSHOT_FIELDS,
-    _sort: "-startTime",
-    _limit: String(SNAPSHOT_LIMIT),
-    _context: "nicolens-watch",
-  });
-
-  params.set("filters[startTime][gte]", since);
-
-  if (filtersJson !== null && filtersJson !== "") {
-    try {
-      const filters = JSON.parse(filtersJson) as Record<string, Record<string, string>>;
-      for (const [field, ops] of Object.entries(filters)) {
-        if (field === "startTime") {
-          continue;
-        }
-        for (const [op, val] of Object.entries(ops)) {
-          params.set(`filters[${field}][${op}]`, val);
-        }
-      }
-    } catch {
-      // skip invalid JSON
-    }
-  }
-
-  return `${SNAPSHOT_API}?${params.toString()}`;
-};
-
-interface CloneResult {
-  processed: number;
+interface SyncResult {
+  tagsProcessed: number;
   videosStored: number;
   errors: number;
 }
 
-export const runClone = async (): Promise<CloneResult> => {
+export const runSync = async (): Promise<SyncResult> => {
   const db = getDb();
   const now = new Date().toISOString();
-  const result: CloneResult = { processed: 0, videosStored: 0, errors: 0 };
+  const since = new Date(Date.now() - MS_PER_DAY).toISOString();
+  const result: SyncResult = { tagsProcessed: 0, videosStored: 0, errors: 0 };
 
-  const conditions = await db
-    .select()
-    .from(watchConditions)
-    .where(eq(watchConditions.isActive, true));
+  // Get distinct active tags
+  const activeTagRows = await db
+    .selectDistinct({ tag: tagTriggers.tag })
+    .from(tagTriggers)
+    .where(eq(tagTriggers.isActive, true));
 
-  console.log(`[clone] Processing ${String(conditions.length)} conditions`);
+  const tags = activeTagRows.map((r) => r.tag);
+  console.log(`[snapshot-syncer] Processing ${String(tags.length)} unique tags`);
 
-  for (const condition of conditions) {
-    result.processed++;
-
+  for (const tag of tags) {
+    result.tagsProcessed++;
     try {
-      const since = condition.lastClonedAt ?? new Date(Date.now() - MS_PER_DAY).toISOString();
-      const url = buildSnapshotUrl(condition.query, condition.targets, condition.filtersJson, since);
-
-      const response = await fetch(url, {
-        headers: { "User-Agent": "nicolens-clone/1.0" },
+      const response = await searchSnapshot({
+        query: tag,
+        targets: "tagsExact",
+        sort: "-startTime",
+        limit: LIMIT,
+        filters: { startTime: { gte: since } },
+        context: "nicolens-snapshot-syncer",
+        userAgent: USER_AGENT,
       });
 
-      if (!response.ok) {
-        console.error(`[clone] API error for condition ${condition.id}: ${String(response.status)}`);
-        result.errors++;
-        await wait(RATE_LIMIT_MS);
-        continue;
-      }
-
-      const json: unknown = await response.json();
-      if (!isSnapshotResponse(json)) {
-        result.errors++;
-        await wait(RATE_LIMIT_MS);
-        continue;
-      }
-
-      if (json.data.length > 0) {
-        const rows = json.data.map((video) => ({
-          conditionId: condition.id,
+      if (response.data.length > 0) {
+        const rows = response.data.map((video) => ({
+          tag,
           contentId: video.contentId,
           videoData: JSON.stringify(video),
           discoveredAt: now,
         }));
 
         await db.insert(watchResults).values(rows).onConflictDoNothing();
-        result.videosStored += json.data.length;
-        console.log(`[clone] ${condition.label}: ${String(json.data.length)} videos stored`);
+        result.videosStored += response.data.length;
+        console.log(`[snapshot-syncer] tag "${tag}": ${String(response.data.length)} videos stored`);
       }
-
-      await db
-        .update(watchConditions)
-        .set({ lastClonedAt: now })
-        .where(eq(watchConditions.id, condition.id));
     } catch (error) {
-      console.error(`[clone] Error for condition ${condition.id}:`, error);
+      if (error instanceof SnapshotApiError) {
+        console.error(`[snapshot-syncer] Snapshot API error for tag "${tag}": ${error.errorCode}`);
+      } else {
+        console.error(`[snapshot-syncer] Error for tag "${tag}":`, error);
+      }
       result.errors++;
     }
 
     await wait(RATE_LIMIT_MS);
   }
 
-  // Cleanup old results
+  // Cleanup
   const cutoff = new Date(Date.now() - RETENTION_DAYS * MS_PER_DAY).toISOString();
   await db.delete(watchResults).where(lt(watchResults.discoveredAt, cutoff));
 
@@ -534,18 +2005,17 @@ export const runClone = async (): Promise<CloneResult> => {
 };
 ```
 
-- [ ] **Step 4: Implement index.ts entry point**
+- [ ] **Step 4: Implement index.ts**
 
-`apps/tag-scanner/src/index.ts`:
+`apps/snapshot-syncer/src/index.ts`:
 
 ```typescript
-import { runClone } from "./clone-handler";
+import { runSync } from "./sync-handler";
 
 const main = async () => {
-  console.log("[clone] Starting snapshot clone...");
-  const result = await runClone();
-  console.log("[clone] Complete:", JSON.stringify(result));
-
+  console.log("[snapshot-syncer] Starting...");
+  const result = await runSync();
+  console.log("[snapshot-syncer] Complete:", JSON.stringify(result));
   if (result.errors > 0) {
     process.exitCode = 1;
   }
@@ -554,35 +2024,228 @@ const main = async () => {
 void main();
 ```
 
-- [ ] **Step 5: Install and verify**
+- [ ] **Step 5: Verify**
 
-Run: `pnpm install`
-Run: `pnpm --filter @nicolens/tag-scanner typecheck`
-Expected: No errors.
+```bash
+pnpm install
+pnpm --filter @nicolens/snapshot-syncer typecheck
+```
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/tag-scanner/
-git commit -m "feat: add apps/tag-scanner snapshot clone service"
+git add apps/snapshot-syncer/ pnpm-lock.yaml
+git commit -m "feat: add apps/snapshot-syncer using nicovideo-snapshot-api"
 ```
 
 ---
 
-### Task 4: Create apps/webhook-dispatcher
+### Task 11: apps/tag-scanner
+
+**Files:**
+- Create: `apps/tag-scanner/package.json`
+- Create: `apps/tag-scanner/tsconfig.json`
+- Create: `apps/tag-scanner/src/scan-handler.ts`
+- Create: `apps/tag-scanner/src/index.ts`
+
+- [ ] **Step 1: Create package.json**
+
+```json
+{
+  "name": "@nicolens/tag-scanner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@nicolens/datastore": "workspace:*",
+    "drizzle-orm": "^0.45.1"
+  },
+  "devDependencies": {
+    "@nicolens/tsconfig": "workspace:*",
+    "@typescript/native-preview": "7.0.0-dev.20260307.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5"
+  }
+}
+```
+
+- [ ] **Step 2: Create tsconfig.json**
+
+Same as snapshot-syncer's tsconfig.
+
+- [ ] **Step 3: Implement scan-handler.ts**
+
+`apps/tag-scanner/src/scan-handler.ts`:
+
+```typescript
+import { and, eq, notInArray } from "drizzle-orm";
+
+import {
+  getDb,
+  notificationLog,
+  pendingNotifications,
+  tagTriggers,
+  watchResults,
+} from "@nicolens/datastore";
+
+interface VideoContent {
+  contentId: string;
+  title: string;
+  thumbnailUrl: string;
+  viewCounter: number;
+  likeCounter: number;
+  commentCounter: number;
+  startTime: string;
+  [key: string]: unknown;
+}
+
+interface ScanResult {
+  triggersProcessed: number;
+  pendingCreated: number;
+  errors: number;
+}
+
+export const runScan = async (): Promise<ScanResult> => {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const result: ScanResult = { triggersProcessed: 0, pendingCreated: 0, errors: 0 };
+
+  const activeTriggers = await db
+    .select()
+    .from(tagTriggers)
+    .where(eq(tagTriggers.isActive, true));
+
+  console.log(`[tag-scanner] Processing ${String(activeTriggers.length)} triggers`);
+
+  for (const trigger of activeTriggers) {
+    result.triggersProcessed++;
+
+    try {
+      // Find already-notified content IDs for this trigger
+      const alreadyNotified = await db
+        .select({ contentId: notificationLog.contentId })
+        .from(notificationLog)
+        .where(eq(notificationLog.triggerId, trigger.id));
+
+      const notifiedIds = alreadyNotified.map((n) => n.contentId);
+
+      // Find unnotified videos in watch_results for this tag
+      const unnotifiedResults = await db
+        .select()
+        .from(watchResults)
+        .where(
+          notifiedIds.length > 0
+            ? and(eq(watchResults.tag, trigger.tag), notInArray(watchResults.contentId, notifiedIds))
+            : eq(watchResults.tag, trigger.tag),
+        );
+
+      if (unnotifiedResults.length === 0) {
+        continue;
+      }
+
+      // Build pending notifications (one per video for simplicity)
+      // Actually: batch all videos into one payload per trigger
+      const videos: VideoContent[] = [];
+      for (const row of unnotifiedResults) {
+        try {
+          videos.push(JSON.parse(row.videoData) as VideoContent);
+        } catch {
+          // skip invalid
+        }
+      }
+
+      if (videos.length === 0) {
+        continue;
+      }
+
+      const payload = {
+        trigger: { type: "tag" as const, tag: trigger.tag },
+        videos: videos.map((v) => ({
+          contentId: v.contentId,
+          title: v.title,
+          url: `https://nico.ms/${v.contentId}`,
+          thumbnailUrl: v.thumbnailUrl,
+          viewCounter: v.viewCounter,
+          likeCounter: v.likeCounter,
+          commentCounter: v.commentCounter,
+          startTime: v.startTime,
+        })),
+        totalNew: videos.length,
+      };
+
+      // One pending row per video (so dispatcher can log individually)
+      const pendingRows = videos.map((v) => ({
+        id: crypto.randomUUID(),
+        webhookId: trigger.webhookId,
+        triggerType: "tag",
+        triggerId: trigger.id,
+        contentId: v.contentId,
+        payload: JSON.stringify(payload), // same payload for all rows of this batch
+        createdAt: now,
+      }));
+
+      await db.insert(pendingNotifications).values(pendingRows);
+      result.pendingCreated += pendingRows.length;
+      console.log(`[tag-scanner] trigger ${trigger.id} (#${trigger.tag}): ${String(videos.length)} pending`);
+    } catch (error) {
+      console.error(`[tag-scanner] Error for trigger ${trigger.id}:`, error);
+      result.errors++;
+    }
+  }
+
+  return result;
+};
+```
+
+- [ ] **Step 4: Implement index.ts**
+
+`apps/tag-scanner/src/index.ts`:
+
+```typescript
+import { runScan } from "./scan-handler";
+
+const main = async () => {
+  console.log("[tag-scanner] Starting...");
+  const result = await runScan();
+  console.log("[tag-scanner] Complete:", JSON.stringify(result));
+  if (result.errors > 0) {
+    process.exitCode = 1;
+  }
+};
+
+void main();
+```
+
+- [ ] **Step 5: Verify & Commit**
+
+```bash
+pnpm install
+pnpm --filter @nicolens/tag-scanner typecheck
+git add apps/tag-scanner/
+git commit -m "feat: add apps/tag-scanner (watch_results to pending_notifications)"
+```
+
+---
+
+### Task 12: apps/webhook-dispatcher
 
 **Files:**
 - Create: `apps/webhook-dispatcher/package.json`
 - Create: `apps/webhook-dispatcher/tsconfig.json`
+- Create: `apps/webhook-dispatcher/vitest.config.ts`
 - Create: `apps/webhook-dispatcher/src/url-validator.ts`
 - Create: `apps/webhook-dispatcher/src/url-validator.test.ts`
 - Create: `apps/webhook-dispatcher/src/webhook-formats.ts`
 - Create: `apps/webhook-dispatcher/src/webhook-formats.test.ts`
 - Create: `apps/webhook-dispatcher/src/webhook-sender.ts`
-- Create: `apps/webhook-dispatcher/src/notify-handler.ts`
+- Create: `apps/webhook-dispatcher/src/dispatcher-handler.ts`
 - Create: `apps/webhook-dispatcher/src/index.ts`
 
-- [ ] **Step 1: Create apps/webhook-dispatcher/package.json**
+- [ ] **Step 1: Create package.json**
 
 ```json
 {
@@ -593,8 +2256,7 @@ git commit -m "feat: add apps/tag-scanner snapshot clone service"
   "scripts": {
     "start": "tsx src/index.ts",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
     "@nicolens/datastore": "workspace:*",
@@ -602,6 +2264,7 @@ git commit -m "feat: add apps/tag-scanner snapshot clone service"
   },
   "devDependencies": {
     "@nicolens/tsconfig": "workspace:*",
+    "@typescript/native-preview": "7.0.0-dev.20260307.1",
     "tsx": "^4.19.0",
     "typescript": "^5",
     "vitest": "^4.0.18"
@@ -609,8 +2272,9 @@ git commit -m "feat: add apps/tag-scanner snapshot clone service"
 }
 ```
 
-- [ ] **Step 2: Create apps/webhook-dispatcher/tsconfig.json**
+- [ ] **Step 2: Create tsconfig.json and vitest.config.ts**
 
+`apps/webhook-dispatcher/tsconfig.json`:
 ```json
 {
   "extends": "@nicolens/tsconfig/base.json",
@@ -622,45 +2286,17 @@ git commit -m "feat: add apps/tag-scanner snapshot clone service"
 }
 ```
 
-- [ ] **Step 3: Implement url-validator.ts with tests**
-
-`apps/webhook-dispatcher/src/url-validator.ts`:
-
+`apps/webhook-dispatcher/vitest.config.ts`:
 ```typescript
-const BLOCKED_HOSTNAMES = new Set(["localhost", "0.0.0.0", "[::1]"]);
+import { defineConfig } from "vitest/config";
 
-const isPrivateIp = (hostname: string): boolean => {
-  if (BLOCKED_HOSTNAMES.has(hostname)) {
-    return true;
-  }
-  if (hostname.startsWith("127.")) {
-    return true;
-  }
-  if (hostname.startsWith("10.")) {
-    return true;
-  }
-  if (hostname.startsWith("192.168.")) {
-    return true;
-  }
-  return /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
-};
-
-export const validateWebhookUrl = (url: string): boolean => {
-  if (url === "") {
-    return false;
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== "https:") {
-    return false;
-  }
-  return !isPrivateIp(parsed.hostname);
-};
+// oxlint-disable-next-line import/no-default-export
+export default defineConfig({
+  test: { include: ["src/**/*.test.ts"] },
+});
 ```
+
+- [ ] **Step 3: Write failing test for url-validator**
 
 `apps/webhook-dispatcher/src/url-validator.test.ts`:
 
@@ -674,11 +2310,11 @@ describe("validateWebhookUrl", () => {
     expect(validateWebhookUrl("https://discord.com/api/webhooks/123/abc")).toBe(true);
   });
 
-  it("rejects http URL", () => {
+  it("rejects http", () => {
     expect(validateWebhookUrl("http://example.com/webhook")).toBe(false);
   });
 
-  it("rejects empty string", () => {
+  it("rejects empty", () => {
     expect(validateWebhookUrl("")).toBe(false);
   });
 
@@ -692,35 +2328,128 @@ describe("validateWebhookUrl", () => {
     expect(validateWebhookUrl("https://192.168.1.1/webhook")).toBe(false);
     expect(validateWebhookUrl("https://127.0.0.1/webhook")).toBe(false);
   });
+
+  it("rejects link-local", () => {
+    expect(validateWebhookUrl("https://169.254.1.1/webhook")).toBe(false);
+  });
 });
 ```
 
-- [ ] **Step 4: Implement webhook-formats.ts with tests**
+- [ ] **Step 4: Run to verify failure, then implement**
 
-`apps/webhook-dispatcher/src/webhook-formats.ts`:
+```bash
+pnpm --filter @nicolens/webhook-dispatcher test
+```
+
+Expected: FAIL.
+
+Create `apps/webhook-dispatcher/src/url-validator.ts`:
 
 ```typescript
-interface VideoContent {
+const BLOCKED = new Set(["localhost", "0.0.0.0", "[::1]"]);
+
+const isPrivate = (h: string): boolean => {
+  if (BLOCKED.has(h)) return true;
+  if (h.startsWith("127.")) return true;
+  if (h.startsWith("10.")) return true;
+  if (h.startsWith("192.168.")) return true;
+  if (h.startsWith("169.254.")) return true;
+  return /^172\.(1[6-9]|2\d|3[01])\./.test(h);
+};
+
+export const validateWebhookUrl = (url: string): boolean => {
+  if (url === "") return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  return !isPrivate(parsed.hostname);
+};
+```
+
+Run: `pnpm --filter @nicolens/webhook-dispatcher test` → Expected: PASS.
+
+- [ ] **Step 5: Write failing test for webhook-formats**
+
+`apps/webhook-dispatcher/src/webhook-formats.test.ts`:
+
+```typescript
+import { describe, expect, it } from "vitest";
+
+import { formatDiscord, formatGeneric } from "./webhook-formats";
+
+const payloadStr = JSON.stringify({
+  trigger: { type: "tag", tag: "VOCALOID" },
+  videos: [
+    {
+      contentId: "sm123",
+      title: "Test",
+      url: "https://nico.ms/sm123",
+      thumbnailUrl: "https://example.com/t.jpg",
+      viewCounter: 1000,
+      likeCounter: 50,
+      commentCounter: 10,
+      startTime: "2026-04-12T10:00:00+09:00",
+    },
+  ],
+  totalNew: 1,
+});
+
+describe("formatGeneric", () => {
+  it("returns the payload as-is", () => {
+    const result = formatGeneric(payloadStr);
+    expect(result).toEqual(JSON.parse(payloadStr));
+  });
+});
+
+describe("formatDiscord", () => {
+  it("builds embed with video info", () => {
+    const result = formatDiscord(payloadStr);
+    expect(result.content).toContain("VOCALOID");
+    expect(result.embeds).toHaveLength(1);
+    expect(result.embeds[0].url).toBe("https://nico.ms/sm123");
+  });
+
+  it("limits to 10 embeds", () => {
+    const videos = Array.from({ length: 15 }, (_, i) => ({
+      contentId: `sm${String(i)}`,
+      title: `Test ${String(i)}`,
+      url: `https://nico.ms/sm${String(i)}`,
+      thumbnailUrl: "https://example.com/t.jpg",
+      viewCounter: 1,
+      likeCounter: 1,
+      commentCounter: 1,
+      startTime: "2026-04-12T10:00:00+09:00",
+    }));
+    const big = JSON.stringify({ trigger: { type: "tag", tag: "T" }, videos, totalNew: 15 });
+    const result = formatDiscord(big);
+    expect(result.embeds).toHaveLength(10);
+  });
+});
+```
+
+Run: FAIL.
+
+Create `apps/webhook-dispatcher/src/webhook-formats.ts`:
+
+```typescript
+interface VideoEntry {
   contentId: string;
   title: string;
+  url: string;
+  thumbnailUrl: string;
   viewCounter: number;
   likeCounter: number;
   commentCounter: number;
-  thumbnailUrl: string;
   startTime: string;
-  [key: string]: unknown;
 }
 
-interface ConditionInfo {
-  id: string;
-  label: string;
-  query: string;
-}
-
-interface GenericPayload {
-  condition: ConditionInfo;
-  videos: VideoContent[];
-  checkedAt: string;
+interface Payload {
+  trigger: { type: string; tag: string };
+  videos: VideoEntry[];
   totalNew: number;
 }
 
@@ -737,122 +2466,59 @@ interface DiscordPayload {
   embeds: DiscordEmbed[];
 }
 
-const DISCORD_MAX_EMBEDS = 10;
+const DISCORD_MAX = 10;
 
-const formatCount = (n: number): string => n.toLocaleString("ja-JP");
+const fmt = (n: number): string => n.toLocaleString("ja-JP");
 
-export const buildGenericPayload = (
-  condition: ConditionInfo,
-  videos: VideoContent[],
-  checkedAt: string,
-): GenericPayload => ({
-  condition,
-  videos,
-  checkedAt,
-  totalNew: videos.length,
-});
+const parsePayload = (payloadStr: string): Payload => JSON.parse(payloadStr) as Payload;
 
-const videoToEmbed = (video: VideoContent): DiscordEmbed => ({
-  title: video.title,
-  url: `https://nico.ms/${video.contentId}`,
-  thumbnail: video.thumbnailUrl ? { url: video.thumbnailUrl } : undefined,
-  fields: [
-    { name: "再生", value: formatCount(video.viewCounter), inline: true },
-    { name: "いいね", value: formatCount(video.likeCounter), inline: true },
-    { name: "コメント", value: formatCount(video.commentCounter), inline: true },
-  ],
-  timestamp: video.startTime,
-});
+export const formatGeneric = (payloadStr: string): Payload => parsePayload(payloadStr);
 
-export const buildDiscordPayload = (
-  condition: ConditionInfo,
-  videos: VideoContent[],
-): DiscordPayload => ({
-  content: `**${condition.label}** - ${String(videos.length)}件の新着動画`,
-  embeds: videos.slice(0, DISCORD_MAX_EMBEDS).map(videoToEmbed),
-});
+export const formatDiscord = (payloadStr: string): DiscordPayload => {
+  const p = parsePayload(payloadStr);
+  return {
+    content: `**#${p.trigger.tag}** - ${String(p.totalNew)}件の新着動画`,
+    embeds: p.videos.slice(0, DISCORD_MAX).map((v) => ({
+      title: v.title,
+      url: v.url,
+      thumbnail: v.thumbnailUrl !== "" ? { url: v.thumbnailUrl } : undefined,
+      fields: [
+        { name: "再生", value: fmt(v.viewCounter), inline: true },
+        { name: "いいね", value: fmt(v.likeCounter), inline: true },
+        { name: "コメント", value: fmt(v.commentCounter), inline: true },
+      ],
+      timestamp: v.startTime,
+    })),
+  };
+};
 ```
 
-`apps/webhook-dispatcher/src/webhook-formats.test.ts`:
+Run: PASS.
 
-```typescript
-import { describe, expect, it } from "vitest";
-
-import { buildDiscordPayload, buildGenericPayload } from "./webhook-formats";
-
-const makeVideo = (overrides = {}) => ({
-  contentId: "sm12345",
-  title: "Test Video",
-  viewCounter: 1000,
-  likeCounter: 100,
-  commentCounter: 30,
-  thumbnailUrl: "https://img.example.com/thumb.jpg",
-  startTime: "2026-04-11T10:00:00+09:00",
-  ...overrides,
-});
-
-const condition = { id: "c1", label: "VOCALOID新着", query: "VOCALOID" };
-
-describe("buildGenericPayload", () => {
-  it("builds correct structure", () => {
-    const result = buildGenericPayload(condition, [makeVideo()], "2026-04-11T05:10:00Z");
-    expect(result.totalNew).toBe(1);
-    expect(result.condition.label).toBe("VOCALOID新着");
-  });
-});
-
-describe("buildDiscordPayload", () => {
-  it("builds embeds with video info", () => {
-    const result = buildDiscordPayload(condition, [makeVideo()]);
-    expect(result.embeds).toHaveLength(1);
-    expect(result.embeds[0].url).toBe("https://nico.ms/sm12345");
-  });
-
-  it("limits to 10 embeds", () => {
-    const videos = Array.from({ length: 15 }, (_, i) =>
-      makeVideo({ contentId: `sm${String(i)}` }),
-    );
-    const result = buildDiscordPayload(condition, videos);
-    expect(result.embeds).toHaveLength(10);
-  });
-});
-```
-
-- [ ] **Step 5: Implement webhook-sender.ts**
+- [ ] **Step 6: Implement webhook-sender.ts**
 
 `apps/webhook-dispatcher/src/webhook-sender.ts`:
 
 ```typescript
-import { buildDiscordPayload, buildGenericPayload } from "./webhook-formats";
+import { formatDiscord, formatGeneric } from "./webhook-formats";
+import { validateWebhookUrl } from "./url-validator";
 
-interface VideoContent {
-  contentId: string;
-  title: string;
-  viewCounter: number;
-  likeCounter: number;
-  commentCounter: number;
-  thumbnailUrl: string;
-  startTime: string;
-  [key: string]: unknown;
-}
-
-interface SendWebhookParams {
+interface SendParams {
   url: string;
   format: string;
-  condition: { id: string; label: string; query: string };
-  videos: VideoContent[];
-  checkedAt: string;
+  payloadStr: string;
 }
 
-interface SendWebhookResult {
+interface SendResult {
   success: boolean;
 }
 
-export const sendWebhook = async (params: SendWebhookParams): Promise<SendWebhookResult> => {
-  const payload =
-    params.format === "discord"
-      ? buildDiscordPayload(params.condition, params.videos)
-      : buildGenericPayload(params.condition, params.videos, params.checkedAt);
+export const sendWebhook = async (params: SendParams): Promise<SendResult> => {
+  if (!validateWebhookUrl(params.url)) {
+    return { success: false };
+  }
+
+  const payload = params.format === "discord" ? formatDiscord(params.payloadStr) : formatGeneric(params.payloadStr);
 
   try {
     const response = await fetch(params.url, {
@@ -867,148 +2533,105 @@ export const sendWebhook = async (params: SendWebhookParams): Promise<SendWebhoo
 };
 ```
 
-- [ ] **Step 6: Implement notify-handler.ts**
+- [ ] **Step 7: Implement dispatcher-handler.ts**
 
-`apps/webhook-dispatcher/src/notify-handler.ts`:
+`apps/webhook-dispatcher/src/dispatcher-handler.ts`:
 
 ```typescript
-import { and, eq, lt, notInArray } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 
-import { getDb, watchConditions, watchNotifications, watchResults } from "@nicolens/datastore";
+import { getDb, notificationLog, pendingNotifications, webhooks } from "@nicolens/datastore";
 
 import { sendWebhook } from "./webhook-sender";
 
 const RETENTION_DAYS = 90;
 const MS_PER_DAY = 86400000;
 
-interface VideoContent {
-  contentId: string;
-  title: string;
-  viewCounter: number;
-  likeCounter: number;
-  commentCounter: number;
-  thumbnailUrl: string;
-  startTime: string;
-  [key: string]: unknown;
-}
-
-interface NotifyResult {
+interface DispatchResult {
   processed: number;
-  notified: number;
-  errors: number;
+  succeeded: number;
+  failed: number;
 }
 
-export const runNotify = async (): Promise<NotifyResult> => {
+export const runDispatch = async (): Promise<DispatchResult> => {
   const db = getDb();
   const now = new Date().toISOString();
-  const result: NotifyResult = { processed: 0, notified: 0, errors: 0 };
+  const result: DispatchResult = { processed: 0, succeeded: 0, failed: 0 };
 
-  const conditions = await db
-    .select()
-    .from(watchConditions)
-    .where(eq(watchConditions.isActive, true));
+  const pending = await db.select().from(pendingNotifications);
 
-  console.log(`[notify] Processing ${String(conditions.length)} conditions`);
+  console.log(`[webhook-dispatcher] Processing ${String(pending.length)} pending notifications`);
 
-  for (const condition of conditions) {
+  for (const entry of pending) {
     result.processed++;
 
     try {
-      // Get already-notified content IDs for this condition
-      const notified = await db
-        .select({ contentId: watchNotifications.contentId })
-        .from(watchNotifications)
-        .where(eq(watchNotifications.conditionId, condition.id));
+      const [webhook] = await db
+        .select()
+        .from(webhooks)
+        .where(eq(webhooks.id, entry.webhookId))
+        .limit(1);
 
-      const notifiedIds = notified.map((n) => n.contentId);
-
-      // Find unnotified results
-      const unnotifiedQuery = db
-        .select({
-          contentId: watchResults.contentId,
-          videoData: watchResults.videoData,
-        })
-        .from(watchResults)
-        .where(
-          notifiedIds.length > 0
-            ? and(
-                eq(watchResults.conditionId, condition.id),
-                notInArray(watchResults.contentId, notifiedIds),
-              )
-            : eq(watchResults.conditionId, condition.id),
-        );
-
-      const unnotified = await unnotifiedQuery;
-
-      if (unnotified.length === 0) {
+      if (webhook === undefined || !webhook.isActive) {
+        // Webhook deleted or inactive; drop pending
+        await db.delete(pendingNotifications).where(eq(pendingNotifications.id, entry.id));
         continue;
       }
 
-      // Parse video data
-      const videos = unnotified
-        .map((r) => {
-          try {
-            return JSON.parse(r.videoData) as VideoContent;
-          } catch {
-            return null;
-          }
-        })
-        .filter((v): v is VideoContent => v !== null);
-
-      if (videos.length === 0) {
-        continue;
-      }
-
-      // Send webhook
-      const webhookResult = await sendWebhook({
-        url: condition.webhookUrl,
-        format: condition.webhookFormat,
-        condition: { id: condition.id, label: condition.label, query: condition.query },
-        videos,
-        checkedAt: now,
+      const sendResult = await sendWebhook({
+        url: webhook.url,
+        format: webhook.format,
+        payloadStr: entry.payload,
       });
 
-      if (webhookResult.success) {
-        const notifRows = videos.map((v) => ({
+      // Record in notification_log
+      await db
+        .insert(notificationLog)
+        .values({
           id: crypto.randomUUID(),
-          conditionId: condition.id,
-          contentId: v.contentId,
-          notifiedAt: now,
-        }));
-        await db.insert(watchNotifications).values(notifRows).onConflictDoNothing();
-        result.notified += videos.length;
-        console.log(`[notify] ${condition.label}: ${String(videos.length)} notifications sent`);
+          webhookId: entry.webhookId,
+          triggerType: entry.triggerType,
+          triggerId: entry.triggerId,
+          contentId: entry.contentId,
+          sentAt: now,
+          success: sendResult.success,
+        })
+        .onConflictDoNothing();
+
+      // Remove from pending regardless (log records outcome)
+      await db.delete(pendingNotifications).where(eq(pendingNotifications.id, entry.id));
+
+      if (sendResult.success) {
+        result.succeeded++;
       } else {
-        console.error(`[notify] Webhook failed for condition ${condition.id}`);
-        result.errors++;
+        result.failed++;
       }
     } catch (error) {
-      console.error(`[notify] Error for condition ${condition.id}:`, error);
-      result.errors++;
+      console.error(`[webhook-dispatcher] Error processing ${entry.id}:`, error);
+      result.failed++;
     }
   }
 
-  // Cleanup old notifications
+  // Cleanup old logs
   const cutoff = new Date(Date.now() - RETENTION_DAYS * MS_PER_DAY).toISOString();
-  await db.delete(watchNotifications).where(lt(watchNotifications.notifiedAt, cutoff));
+  await db.delete(notificationLog).where(lt(notificationLog.sentAt, cutoff));
 
   return result;
 };
 ```
 
-- [ ] **Step 7: Implement index.ts entry point**
+- [ ] **Step 8: Implement index.ts**
 
 `apps/webhook-dispatcher/src/index.ts`:
 
 ```typescript
-import { runNotify } from "./notify-handler";
+import { runDispatch } from "./dispatcher-handler";
 
 const main = async () => {
-  console.log("[notify] Starting notifications...");
-  const result = await runNotify();
-  console.log("[notify] Complete:", JSON.stringify(result));
-
-  if (result.errors > 0) {
+  console.log("[webhook-dispatcher] Starting...");
+  const result = await runDispatch();
+  console.log("[webhook-dispatcher] Complete:", JSON.stringify(result));
+  if (result.failed > 0) {
     process.exitCode = 1;
   }
 };
@@ -1016,435 +2639,82 @@ const main = async () => {
 void main();
 ```
 
-- [ ] **Step 8: Install, test, verify**
+- [ ] **Step 9: Verify**
 
-Run: `pnpm install`
-Run: `pnpm --filter @nicolens/webhook-dispatcher test`
-Expected: All tests pass.
-Run: `pnpm --filter @nicolens/webhook-dispatcher typecheck`
-Expected: No errors.
+```bash
+pnpm install
+pnpm --filter @nicolens/webhook-dispatcher test
+pnpm --filter @nicolens/webhook-dispatcher typecheck
+```
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add apps/webhook-dispatcher/
-git commit -m "feat: add apps/webhook-dispatcher webhook notification service"
+git commit -m "feat: add apps/webhook-dispatcher (pending_notifications to HTTP)"
 ```
 
 ---
 
-### Task 5: API Routes (apps/web)
+### Task 13: GitHub Actions Workflow
 
 **Files:**
-- Create: `apps/web/app/api/watch/route.ts`
-- Create: `apps/web/app/api/watch/[token]/route.ts`
+- Create: `.github/workflows/tag-watch.yml`
+- Modify: `turbo.json`
 
-- [ ] **Step 1: Implement POST /api/watch**
+- [ ] **Step 1: Update turbo.json**
 
-`apps/web/app/api/watch/route.ts`:
+Add `start` task to the `tasks` object:
 
-```typescript
-import { type NextRequest, NextResponse } from "next/server";
-
-import { getDb, watchConditions } from "@nicolens/datastore";
-
-const HTTP_BAD_REQUEST = 400;
-const BLOCKED_HOSTNAMES = new Set(["localhost", "0.0.0.0", "[::1]"]);
-
-const isValidHttpsUrl = (url: string): boolean => {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "https:") return false;
-    const h = parsed.hostname;
-    if (BLOCKED_HOSTNAMES.has(h)) return false;
-    if (h.startsWith("127.") || h.startsWith("10.") || h.startsWith("192.168.")) return false;
-    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const VALID_FORMATS = new Set(["generic", "discord"]);
-
-export const POST = async (request: NextRequest) => {
-  const body: unknown = await request.json().catch(() => null);
-  if (typeof body !== "object" || body === null) {
-    return NextResponse.json({ error: "Invalid request body" }, { status: HTTP_BAD_REQUEST });
-  }
-
-  const b = body as Record<string, unknown>;
-  const label = typeof b["label"] === "string" ? b["label"].trim() : "";
-  const query = typeof b["query"] === "string" ? b["query"].trim() : "";
-  const targets = typeof b["targets"] === "string" ? b["targets"] : "title,description,tags";
-  const filtersJson = typeof b["filtersJson"] === "string" ? b["filtersJson"] : null;
-  const webhookUrl = typeof b["webhookUrl"] === "string" ? b["webhookUrl"].trim() : "";
-  const webhookFormat =
-    typeof b["webhookFormat"] === "string" && VALID_FORMATS.has(b["webhookFormat"])
-      ? b["webhookFormat"]
-      : "generic";
-
-  if (label === "" || query === "") {
-    return NextResponse.json({ error: "label and query are required" }, { status: HTTP_BAD_REQUEST });
-  }
-
-  if (!isValidHttpsUrl(webhookUrl)) {
-    return NextResponse.json({ error: "Invalid webhook URL" }, { status: HTTP_BAD_REQUEST });
-  }
-
-  const id = crypto.randomUUID();
-  const token = crypto.randomUUID();
-
-  const db = getDb();
-  await db.insert(watchConditions).values({
-    id,
-    token,
-    label,
-    query,
-    targets,
-    filtersJson,
-    webhookUrl,
-    webhookFormat,
-    isActive: true,
-    lastClonedAt: null,
-    createdAt: new Date().toISOString(),
-  });
-
-  return NextResponse.json({ id, token, manageUrl: `/watch/${token}` });
-};
-```
-
-- [ ] **Step 2: Implement GET/PATCH/DELETE /api/watch/[token]**
-
-`apps/web/app/api/watch/[token]/route.ts`:
-
-```typescript
-import { type NextRequest, NextResponse } from "next/server";
-import { desc, eq } from "drizzle-orm";
-
-import { getDb, watchConditions, watchNotifications } from "@nicolens/datastore";
-
-const HTTP_NOT_FOUND = 404;
-const HTTP_BAD_REQUEST = 400;
-const RECENT_LIMIT = 10;
-
-interface RouteParams {
-  params: Promise<{ token: string }>;
-}
-
-const findByToken = async (token: string) => {
-  const db = getDb();
-  const rows = await db
-    .select()
-    .from(watchConditions)
-    .where(eq(watchConditions.token, token))
-    .limit(1);
-  return rows[0] ?? null;
-};
-
-export const GET = async (_request: NextRequest, { params }: RouteParams) => {
-  const { token } = await params;
-  const condition = await findByToken(token);
-  if (condition === null) {
-    return NextResponse.json({ error: "Not found" }, { status: HTTP_NOT_FOUND });
-  }
-
-  const db = getDb();
-  const recentNotifications = await db
-    .select({ contentId: watchNotifications.contentId, notifiedAt: watchNotifications.notifiedAt })
-    .from(watchNotifications)
-    .where(eq(watchNotifications.conditionId, condition.id))
-    .orderBy(desc(watchNotifications.notifiedAt))
-    .limit(RECENT_LIMIT);
-
-  return NextResponse.json({
-    condition: {
-      ...condition,
-      webhookUrl: undefined,
-      webhookUrlMasked: condition.webhookUrl.replace(/(.{15}).*(.{6})/, "$1***$2"),
+```json
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "dev": { "cache": false, "persistent": true },
+    "build": {
+      "dependsOn": ["^build"],
+      "env": ["DATABASE_URL", "GEMINI_API_KEY", "AUTH_SECRET", "AUTH_GITHUB_ID", "AUTH_GITHUB_SECRET"],
+      "outputs": [".next/**", "!.next/cache/**"]
     },
-    recentNotifications,
-  });
-};
-
-export const PATCH = async (request: NextRequest, { params }: RouteParams) => {
-  const { token } = await params;
-  const condition = await findByToken(token);
-  if (condition === null) {
-    return NextResponse.json({ error: "Not found" }, { status: HTTP_NOT_FOUND });
+    "start": { "cache": false },
+    "lint": {},
+    "fmt": {},
+    "fmt:check": {},
+    "typecheck": {},
+    "knip": {}
   }
-
-  const body: unknown = await request.json().catch(() => null);
-  if (typeof body !== "object" || body === null) {
-    return NextResponse.json({ error: "Invalid body" }, { status: HTTP_BAD_REQUEST });
-  }
-
-  const b = body as Record<string, unknown>;
-  const updates: Record<string, unknown> = {};
-  if (typeof b["label"] === "string") updates["label"] = b["label"].trim();
-  if (typeof b["isActive"] === "boolean") updates["isActive"] = b["isActive"];
-  if (typeof b["webhookUrl"] === "string") updates["webhookUrl"] = b["webhookUrl"];
-  if (typeof b["webhookFormat"] === "string") updates["webhookFormat"] = b["webhookFormat"];
-
-  if (Object.keys(updates).length === 0) {
-    return NextResponse.json({ error: "No valid fields" }, { status: HTTP_BAD_REQUEST });
-  }
-
-  const db = getDb();
-  await db.update(watchConditions).set(updates).where(eq(watchConditions.id, condition.id));
-  return NextResponse.json({ success: true });
-};
-
-export const DELETE = async (_request: NextRequest, { params }: RouteParams) => {
-  const { token } = await params;
-  const condition = await findByToken(token);
-  if (condition === null) {
-    return NextResponse.json({ error: "Not found" }, { status: HTTP_NOT_FOUND });
-  }
-
-  const db = getDb();
-  await db.delete(watchConditions).where(eq(watchConditions.id, condition.id));
-  return NextResponse.json({ success: true });
-};
-```
-
-- [ ] **Step 3: Verify**
-
-Run: `pnpm typecheck`
-Expected: No errors.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add apps/web/app/api/watch/
-git commit -m "feat(web): add watch condition CRUD API routes"
-```
-
----
-
-### Task 6: UI — Watch Button
-
-**Files:**
-- Create: `apps/web/src/features/watch/ui/watch-button.tsx`
-- Create: `apps/web/src/features/watch/index.ts`
-- Modify: `apps/web/src/pages/search/ui/search-page.tsx`
-
-- [ ] **Step 1: Implement WatchButton**
-
-`apps/web/src/features/watch/ui/watch-button.tsx`:
-
-```typescript
-"use client";
-
-import { Bell } from "lucide-react";
-import { useState } from "react";
-
-import { Button } from "@/shared/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/shared/ui/dropdown-menu";
-import { Input } from "@/shared/ui/input";
-import { Label } from "@/shared/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
-
-interface WatchButtonProps {
-  query: string;
-  targets: string;
-  filtersJson: string | null;
-}
-
-type SubmitStatus = "idle" | "submitting" | "success" | "error";
-
-const formatSelectValue = (value: unknown): string => {
-  if (value === "discord") return "Discord";
-  return "Generic";
-};
-
-export const WatchButton = ({ query, targets, filtersJson }: WatchButtonProps) => {
-  const [open, setOpen] = useState(false);
-  const [label, setLabel] = useState(query);
-  const [webhookUrl, setWebhookUrl] = useState("");
-  const [webhookFormat, setWebhookFormat] = useState("generic");
-  const [status, setStatus] = useState<SubmitStatus>("idle");
-  const [manageUrl, setManageUrl] = useState<string | null>(null);
-
-  const handleSubmit = async () => {
-    setStatus("submitting");
-    try {
-      const response = await fetch("/api/watch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label: label.trim(), query, targets, filtersJson, webhookUrl: webhookUrl.trim(), webhookFormat }),
-      });
-      if (!response.ok) { setStatus("error"); return; }
-      const data = (await response.json()) as { manageUrl: string };
-      setManageUrl(data.manageUrl);
-      setStatus("success");
-    } catch {
-      setStatus("error");
-    }
-  };
-
-  if (query === "") return null;
-
-  return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger render={<Button variant="outline" size="icon-sm" aria-label="この条件で通知を受け取る" />}>
-        <Bell className="size-4" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-72 space-y-3 p-3">
-        {status === "success" && manageUrl !== null ? (
-          <div className="space-y-2 text-xs">
-            <p className="font-medium text-green-600">通知設定を保存しました</p>
-            <a href={manageUrl} className="text-blue-600 underline">管理ページを開く</a>
-          </div>
-        ) : (
-          <form onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }} className="space-y-3">
-            <div className="space-y-1">
-              <Label className="text-xs">ラベル</Label>
-              <Input type="text" value={label} onChange={(e) => { setLabel(e.target.value); }} className="h-8 text-xs" placeholder="例: VOCALOID新着" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Webhook URL</Label>
-              <Input type="url" value={webhookUrl} onChange={(e) => { setWebhookUrl(e.target.value); }} className="h-8 text-xs" placeholder="https://..." />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">形式</Label>
-              <Select value={webhookFormat} onValueChange={setWebhookFormat}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue>{formatSelectValue}</SelectValue></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="generic">Generic</SelectItem>
-                  <SelectItem value="discord">Discord</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {status === "error" && <p className="text-xs text-destructive">保存に失敗しました</p>}
-            <Button type="submit" size="sm" className="h-8 w-full text-xs" disabled={status === "submitting" || label.trim() === "" || webhookUrl.trim() === ""}>
-              {status === "submitting" ? "保存中..." : "通知を設定"}
-            </Button>
-          </form>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-};
-```
-
-- [ ] **Step 2: Create barrel**
-
-`apps/web/src/features/watch/index.ts`:
-
-```typescript
-export { WatchButton } from "./ui/watch-button";
-```
-
-- [ ] **Step 3: Add WatchButton to search page**
-
-In `apps/web/src/pages/search/ui/search-page.tsx`:
-
-Add import:
-```typescript
-import { WatchButton } from "@/features/watch";
-```
-
-Change `extraActions` prop:
-```typescript
-extraActions={
-  <>
-    <WatchButton
-      query={search.state.query}
-      targets={search.state.targets}
-      filtersJson={Object.keys(search.state.filters).length > 0 ? JSON.stringify(search.state.filters) : null}
-    />
-    <SaveSearchButton currentUrl={currentUrl} />
-  </>
 }
 ```
 
-- [ ] **Step 4: Verify**
+- [ ] **Step 2: Create workflow**
 
-Run: `pnpm typecheck && pnpm lint`
-Expected: No errors.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add apps/web/src/features/watch/ apps/web/src/pages/search/ui/search-page.tsx
-git commit -m "feat(web): add watch button to search results toolbar"
-```
-
----
-
-### Task 7: Management Page
-
-**Files:**
-- Create: `apps/web/src/features/watch/ui/watch-manage-view.tsx`
-- Create: `apps/web/src/pages/watch/ui/watch-page.tsx`
-- Create: `apps/web/src/pages/watch/index.ts`
-- Create: `apps/web/app/watch/[token]/page.tsx`
-
-- [ ] **Step 1: Create WatchManageView component**
-
-`apps/web/src/features/watch/ui/watch-manage-view.tsx` — client component that fetches `/api/watch/[token]` and renders condition details, toggle, delete, and recent notifications. (Full code as specified in v1 plan Task 12 — same component, just the import path for `@/shared/db` is not needed here since this is a client component using fetch.)
-
-- [ ] **Step 2: Create page composition**
-
-`apps/web/src/pages/watch/ui/watch-page.tsx`:
-```typescript
-"use client";
-import { WatchManageView } from "@/features/watch/ui/watch-manage-view";
-interface WatchPageProps { token: string; }
-export const WatchPage = ({ token }: WatchPageProps) => <WatchManageView token={token} />;
-```
-
-`apps/web/src/pages/watch/index.ts`:
-```typescript
-export { WatchPage } from "./ui/watch-page";
-```
-
-- [ ] **Step 3: Create app router page**
-
-`apps/web/app/watch/[token]/page.tsx`:
-```typescript
-import { WatchPage } from "@/pages/watch";
-interface WatchRouteProps { params: Promise<{ token: string }>; }
-// oxlint-disable-next-line import/no-default-export
-export default async function WatchRoute({ params }: WatchRouteProps) {
-  const { token } = await params;
-  return <WatchPage token={token} />;
-}
-```
-
-- [ ] **Step 4: Verify**
-
-Run: `pnpm typecheck && pnpm lint`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add apps/web/src/features/watch/ui/watch-manage-view.tsx apps/web/src/pages/watch/ "apps/web/app/watch/[token]/"
-git commit -m "feat(web): add watch condition management page"
-```
-
----
-
-### Task 8: GitHub Actions Workflow
-
-**Files:**
-- Create: `.github/workflows/watch.yml`
-
-- [ ] **Step 1: Create workflow**
-
-`.github/workflows/watch.yml`:
+`.github/workflows/tag-watch.yml`:
 
 ```yaml
-name: Watch & Notify
+name: Tag Watch Pipeline
 
 on:
   schedule:
     - cron: '10 20 * * *' # UTC 20:10 = JST 5:10
-  workflow_dispatch: # Manual trigger for testing
+  workflow_dispatch:
 
 jobs:
-  clone:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nicolens/snapshot-syncer start
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+  scan:
+    needs: sync
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1458,8 +2728,8 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-  notify:
-    needs: clone
+  dispatch:
+    needs: scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1474,49 +2744,53 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 ```
 
-- [ ] **Step 2: Update turbo.json**
+- [ ] **Step 3: Manual setup — Add DATABASE_URL to GitHub Secrets**
 
-Add `start` task:
+Developer must: Repo Settings → Secrets and variables → Actions → New repository secret → `DATABASE_URL` = Neon connection string.
 
-```json
-{
-  "tasks": {
-    "start": {
-      "dependsOn": ["^build"],
-      "cache": false
-    }
-  }
-}
-```
-
-(Merge into existing tasks object.)
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add .github/workflows/watch.yml turbo.json
-git commit -m "ci: add GitHub Actions workflow for daily watch clone and notify"
+git add .github/workflows/tag-watch.yml turbo.json
+git commit -m "ci: add daily tag watch pipeline workflow"
 ```
 
 ---
 
-### Task 9: Final Verification
+### Task 14: Final Verification
 
-- [ ] **Step 1: Run full check**
+- [ ] **Step 1: Run full check suite**
 
-Run: `pnpm check`
-Fix any lint, format, typecheck, or knip issues.
+```bash
+pnpm check
+```
 
-- [ ] **Step 2: Test locally**
+Fix any lint, format, typecheck, or knip issues. Common fixes:
+- Unused imports: remove
+- knip unused: add to `apps/web/knip.json` ignore list
+- Type errors: fix
 
-1. Start dev server: `pnpm dev`
-2. Search for a keyword, click bell icon, enter webhook URL, save
-3. Run clone manually: `pnpm --filter @nicolens/tag-scanner start`
-4. Run notify manually: `pnpm --filter @nicolens/webhook-dispatcher start`
-5. Verify webhook received at test endpoint
+- [ ] **Step 2: Manual E2E test**
+
+1. `pnpm dev` → http://localhost:3000
+2. Click "GitHubでログイン" → OAuth → redirect back
+3. Click avatar → "Webhooks" → add webhook (use https://webhook.site URL)
+4. Click avatar → "Tag Watches" → add "VOCALOID" watch pointing to the webhook
+5. Run services manually:
+   ```bash
+   pnpm --filter @nicolens/snapshot-syncer start
+   pnpm --filter @nicolens/tag-scanner start
+   pnpm --filter @nicolens/webhook-dispatcher start
+   ```
+6. Check webhook.site for the test payload
 
 - [ ] **Step 3: Commit any fixes**
 
 ```bash
-git commit -m "fix: resolve lint and type issues for watch feature"
+git add -A
+git commit -m "fix: resolve lint and type issues for tag watch feature"
 ```
+
+- [ ] **Step 4: Trigger workflow manually on GitHub**
+
+Actions tab → "Tag Watch Pipeline" → "Run workflow" → verify all 3 jobs succeed
