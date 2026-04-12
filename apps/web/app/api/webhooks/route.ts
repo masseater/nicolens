@@ -32,8 +32,14 @@ const tryParseUrl = (url: string): URL | undefined => {
   }
 };
 
+const isIpv6Literal = (host: string): boolean => host.includes(":") || host.startsWith("[");
+
 const isPrivateHost = (host: string): boolean => {
   if (BLOCKED_HOSTS.has(host)) {
+    return true;
+  }
+  // Reject all IPv6 literal hostnames; overly strict but safe for webhooks.
+  if (isIpv6Literal(host)) {
     return true;
   }
   if (PRIVATE_HOST_PREFIXES.some((prefix) => host.startsWith(prefix))) {

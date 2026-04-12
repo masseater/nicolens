@@ -29,4 +29,11 @@ describe("validateWebhookUrl", () => {
   it("rejects link-local", () => {
     expect(validateWebhookUrl("https://169.254.1.1/webhook")).toBe(false);
   });
+
+  it("rejects IPv6 literals", () => {
+    expect(validateWebhookUrl("https://[::1]/webhook")).toBe(false);
+    expect(validateWebhookUrl("https://[::ffff:7f00:1]/webhook")).toBe(false);
+    expect(validateWebhookUrl("https://[fc00::1]/webhook")).toBe(false);
+    expect(validateWebhookUrl("https://[2001:db8::1]/webhook")).toBe(false);
+  });
 });
